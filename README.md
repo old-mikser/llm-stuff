@@ -52,19 +52,16 @@ paplay --volume=32768 "$HOME/.claude/hooks/claude-chime.wav"
 ```
 
 **Rebuild the WAV** at a different baked volume or from a different source sound
-using [`make-chime.ps1`](.claude/hooks/make-chime.ps1) (run once via Windows
-PowerShell; it scales an existing WAV down and prepends silence):
+using [`make-chime.py`](.claude/hooks/make-chime.py) — pure Python stdlib, no
+external tools. It scales a source WAV down and prepends the silence:
 
 ```bash
-powershell.exe -NoProfile -ExecutionPolicy Bypass \
-  -File "$(wslpath -w ~/.claude/hooks/make-chime.ps1)" \
-  -Amp 0.6 -Src 'C:\Windows\Media\Windows Notify Messaging.wav'
-# then copy the result to the Linux side:
-cp "/mnt/c/Users/$USER/claude-chime.wav" ~/.claude/hooks/claude-chime.wav
+.claude/hooks/make-chime.py --src some-sound.wav --amp 0.6 \
+  --out ~/.claude/hooks/claude-chime.wav
 ```
 
-`-Amp` is a 0..1 multiplier (0.6 ≈ 14% peak). The script reports the peak amplitude
-so you can check loudness without playing anything.
+`--amp` is a 0..1 multiplier (0.6 ≈ 14% peak). It reports the peak amplitude so
+you can check loudness without playing anything. Source must be 16-bit PCM WAV.
 
 ### Fire only when Claude needs input (not every turn)
 

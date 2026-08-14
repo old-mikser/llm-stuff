@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # Claude Code completion chime — pure Linux path via WSLg PulseAudio (no Windows
-# process). Soft marimba at ~10% (volume baked into the WAV) with a 1s silent
-# lead-in so a sleeping audio device doesn't swallow it.
-#   Volume: either regenerate the WAV, or add `--volume=N` below (0..65536, 65536=100%).
-#   Sound:  replace claude-chime.wav (regen via make-chime.ps1, or drop in any WAV).
+# process). Soft marimba at ~14% (volume baked into the WAV) with a leading
+# silence so a sleeping audio device doesn't swallow it.
+#   Volume, live:  add `--volume=N` to paplay below (0..65536, 65536=100%).
+#   Rebuild WAV:   make-chime.py --src <any.wav> --amp 0.6   (pure stdlib).
+#   Any sound:     just replace claude-chime.wav with another WAV.
 LOG="$HOME/.claude/hooks/notify-done.log"
 CHIME="$HOME/.claude/hooks/claude-chime.wav"
 # WSLg's PulseServer — set explicitly in case the hook shell didn't inherit it.
