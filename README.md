@@ -78,14 +78,23 @@ directly against your normal PulseAudio/PipeWire; on macOS use
 
 ## `no-comment-metadata.sh` — comment policy enforcement
 
-A Python hook (despite the `.sh` name — it's invoked as `python3 …`) that runs on
-every `Edit`/`Write`/`MultiEdit`. It reads the hook JSON on stdin and **blocks the
-edit** (exit code 2, with the reason sent back to Claude) when the added text:
+A Python hook (despite the `.sh` name — it's invoked as `python3 …`) that runs as
+a `PreToolUse` hook on every `Edit`/`Write`/`MultiEdit`. It reads the hook JSON on
+stdin and **blocks the edit before it lands** (exit code 2, with the reason sent
+back to Claude) when the change:
 
 - **(a)** puts metadata inside a comment — dates (`YYYY-MM-DD`), plan/phase/wave
   numbers, task IDs, or phrases like `added in` / `fixed by` / `review fix`; or
-- **(b)** contains a run of **4+ consecutive** comment lines — doc comments
+- **(b)** would leave a run of **4+ consecutive** comment lines — doc comments
   (`///`, `//!`, `/** */`) count too, so long doc blocks are blocked as well.
+
+For check (b) the hook simulates the edit against the on-disk file (splicing
+`new_string` over `old_string`, including `replace_all` and sequential
+`MultiEdit` edits), so a short comment added next to existing comment lines is
+counted as one run. Only runs the edit actually touches are flagged —
+pre-existing long comments elsewhere in the file never block an unrelated edit.
+If the file can't be read (e.g. a new file), it falls back to checking the added
+text in isolation.
 
 It's comment-syntax aware per file extension (`.rs .js .ts .jsx .tsx .go .php .py
 .css .html`). The intent: keep history in git and planning docs, not in code
