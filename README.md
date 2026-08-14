@@ -84,8 +84,8 @@ edit** (exit code 2, with the reason sent back to Claude) when the added text:
 
 - **(a)** puts metadata inside a comment — dates (`YYYY-MM-DD`), plan/phase/wave
   numbers, task IDs, or phrases like `added in` / `fixed by` / `review fix`; or
-- **(b)** contains a run of **4+ consecutive** regular comment lines (documentation
-  comments like `///`, `//!`, `/** */` are exempt).
+- **(b)** contains a run of **4+ consecutive** comment lines — doc comments
+  (`///`, `//!`, `/** */`) count too, so long doc blocks are blocked as well.
 
 It's comment-syntax aware per file extension (`.rs .js .ts .jsx .tsx .go .php .py
 .css .html`). The intent: keep history in git and planning docs, not in code

@@ -1,19 +1,19 @@
 #!/usr/bin/env python3
 # Blocks Edit/Write/MultiEdit to source files when added text either:
 #   (a) puts metadata inside a comment, or
-#   (b) has a run of 4+ consecutive regular comment lines (doc comments exempt).
+#   (b) has a run of 4+ consecutive comment lines. Doc comments count too.
 # Language-aware comment syntax. Reads hook JSON on stdin; exit 2 + stderr => fed back to Claude.
 import json, re, sys, os
 
 MAX_COMMENT_LINES = 3  # 4+ in a row is blocked
 
-# style: line_doc prefixes, line_regular prefixes, block (open, close, doc_open|None)
+# style: line-comment prefixes, block (open, close)
 STYLES = {
-    "c":      (["///", "//!"], ["//"],      ("/*", "*/", "/**")),
-    "c_hash": (["///", "//!"], ["//", "#"], ("/*", "*/", "/**")),
-    "hash":   ([],             ["#"],       None),
-    "block":  ([],             [],          ("/*", "*/", None)),
-    "html":   ([],             [],          ("<!--", "-->", None)),
+    "c":      (["///", "//!", "//"],      ("/*", "*/")),
+    "c_hash": (["///", "//!", "//", "#"], ("/*", "*/")),
+    "hash":   (["#"],                     None),
+    "block":  ([],                        ("/*", "*/")),
+    "html":   ([],                        ("<!--", "-->")),
 }
 EXT_STYLE = {
     ".rs": "c", ".js": "c", ".ts": "c", ".jsx": "c", ".tsx": "c", ".go": "c",
@@ -52,7 +52,7 @@ if not text.strip():
     sys.exit(0)
 
 lines = text.splitlines()
-doc_prefixes, reg_prefixes, block = STYLES[style]
+line_prefixes, block = STYLES[style]
 
 # --- Check (a): metadata inside any comment line ---
 marker = re.compile(MARKERS[style])
@@ -70,9 +70,8 @@ meta = re.compile(
 )
 meta_hits = [ln for ln in lines if marker.search(ln) and meta.search(ln)]
 
-# --- Check (b): run of 4+ consecutive regular (non-doc) comment lines ---
+# --- Check (b): run of 4+ consecutive comment lines ---
 in_block = False
-block_is_doc = False
 run = 0
 run_start = 0
 long_runs = []
@@ -83,32 +82,25 @@ def flush(i):
         long_runs.append((run_start + 1, lines[run_start:i]))
     run = 0
 
-b_open = b_close = b_doc = None
+b_open = b_close = None
 if block:
-    b_open, b_close, b_doc = block
+    b_open, b_close = block
 
 for i, ln in enumerate(lines):
     s = ln.lstrip()
-    is_regular = False
+    is_comment = False
     if in_block:
-        is_regular = not block_is_doc
+        is_comment = True
         if b_close and b_close in ln:
             in_block = False
     else:
-        if any(s.startswith(p) for p in doc_prefixes):
-            pass  # doc line
-        elif any(s.startswith(p) for p in reg_prefixes):
-            is_regular = True
-        elif b_doc and s.startswith(b_doc):
-            if b_close not in ln:
-                in_block = True
-                block_is_doc = True
+        if any(s.startswith(p) for p in line_prefixes):
+            is_comment = True
         elif b_open and s.startswith(b_open):
             if b_close not in ln:
                 in_block = True
-                block_is_doc = False
-            is_regular = True
-    if is_regular:
+            is_comment = True
+    if is_comment:
         if run == 0:
             run_start = i
         run += 1
@@ -127,7 +119,7 @@ if meta_hits:
 
 if long_runs:
     print(f"BLOCKED: comment block over {MAX_COMMENT_LINES} lines in {path} (AGENTS.md § Code comments policy: write fewer comments).", file=sys.stderr)
-    print("Cut it down, or make it a doc comment if it is genuinely API documentation.", file=sys.stderr)
+    print("Cut it down. Doc comments are not exempt.", file=sys.stderr)
     for start, blk in long_runs:
         print(f"  lines {start}-{start + len(blk) - 1} ({len(blk)} comment lines):", file=sys.stderr)
         for ln in blk:
