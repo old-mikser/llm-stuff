@@ -6,7 +6,7 @@ Everything lives under [`.claude/hooks/`](.claude/hooks/). Two hooks are include
 
 | Hook | Event | What it does |
 |------|-------|--------------|
-| [`notify-done.sh`](.claude/hooks/notify-done.sh) | `Stop` | Plays a soft completion chime when Claude finishes a turn. |
+| [`notify-done.sh`](.claude/hooks/notify-done.sh) | `Stop` | Plays a soft completion chime when Claude finishes a turn — by default staying quiet while background agents are still running. |
 | [`no-comment-metadata.sh`](.claude/hooks/no-comment-metadata.sh) | `PreToolUse` (Edit/Write/MultiEdit) | Blocks edits that put metadata in comments or add long comment blocks; asks on ambiguous cases and on oversized comments. |
 
 ## Install
@@ -21,6 +21,12 @@ cp .claude/hooks/* ~/.claude/hooks/
 ```
 
 See [`.claude/settings.example.json`](.claude/settings.example.json) for the exact `hooks` block to merge into your **global** `~/.claude/settings.json`. Restart Claude Code (or start a new session) after editing `settings.json` so the hook registration is picked up. The scripts themselves are read fresh on every run, so you can tweak them without restarting.
+
+## Tests
+
+```bash
+tests/notify-done.test.sh   # no audio: a fake paplay on PATH records its args
+```
 
 ---
 
@@ -62,6 +68,44 @@ external tools. It scales a source WAV down and prepends the silence:
 
 `--amp` is a 0..1 multiplier (0.6 ≈ 14% peak). It reports the peak amplitude so
 you can check loudness without playing anything. Source must be 16-bit PCM WAV.
+
+### Background agents: what the chime actually means
+
+`Stop` fires whenever Claude hands the turn back, which includes handing it back
+while a background agent it launched is still working. One undifferentiated
+chime therefore covers two situations — *finished* and *paused mid-work* — and
+you can't tell them apart without looking at the terminal.
+
+So the hook checks first, and by default says nothing until the work it would be
+announcing is actually over. Three modes, set in `notify-done.conf` (copy
+[`notify-done.conf.example`](.claude/hooks/notify-done.conf.example) next to the
+hook) or as an environment variable, which wins over the file:
+
+| `NOTIFY_MODE` | While a background agent is running | Otherwise |
+| --- | --- | --- |
+| `quiet` *(default)* | silent | chime |
+| `always` | chime | chime |
+| `distinct` | quieter chime (`NOTIFY_PENDING_VOLUME`, default 22000) | chime |
+
+Under `quiet` you still get exactly one chime per piece of work: the agent
+finishing wakes Claude up, and the chime lands when *that* follow-up turn ends.
+
+[`pending-agents.py`](.claude/hooks/pending-agents.py) does the counting, reading
+the session transcript that the hook payload points at. A launch shows up as a
+tool result carrying `isAsync` and an `agentId`; the matching completion arrives
+later as a `task-notification` carrying `<task-id>`. Two consequences worth
+knowing:
+
+- Only the **Agent** tool writes `isAsync`. A background `Bash` — a dev server
+  that's meant to run for hours — is deliberately not counted, or it would hold
+  the chime hostage for as long as it lives.
+- Killed and failed agents get a notification too, so stopping one releases the
+  chime rather than silencing the session for good.
+
+The remaining hole is an agent that dies without notifying at all. `NOTIFY_STALE_MINUTES`
+(default 60) bounds it: past that, a launch stops being counted. And any error in
+the counter is treated as "nothing pending", so a broken detector goes back to
+chiming instead of going silent.
 
 ### Fire only when Claude needs input (not every turn)
 

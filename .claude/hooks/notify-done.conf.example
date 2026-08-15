@@ -1,0 +1,16 @@
+# Copy to notify-done.conf (same directory) to change what the Stop chime does
+# while a background agent is still running. Untracked on purpose, so deploying
+# the repo over ~/.claude/hooks/ leaves your settings alone. Every key is
+# optional; an environment variable of the same name wins over the file.
+
+# quiet    — say nothing until every background agent has reported back (default)
+# always   — chime on every turn handoff, background work or not
+# distinct — chime either way, quieter while agents are still running
+NOTIFY_MODE=quiet
+
+# distinct mode only: paplay volume for the "still working" chime, 0..65536.
+NOTIFY_PENDING_VOLUME=22000
+
+# How long a launched agent stays counted without a completion notification.
+# Bounds the silence if an agent ever dies without one.
+NOTIFY_STALE_MINUTES=60
