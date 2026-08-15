@@ -1,8 +1,7 @@
 # Working in this repo
 
-This repo is the **source of truth** for the Claude Code hooks in `.claude/hooks/`.
-Edit them here — never hand-edit `~/.claude/` to make a change, and never copy
-files between the two by hand.
+The hooks under `.claude/hooks/` are what this repo publishes. Edit them here;
+this is the only copy that matters.
 
 ## Every time you change a hook
 
