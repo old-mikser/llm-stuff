@@ -2,11 +2,12 @@
 
 Personal Claude Code configuration — hooks I reuse across machines.
 
-Everything lives under [`.claude/hooks/`](.claude/hooks/). Two hooks are included:
+Everything lives under [`.claude/hooks/`](.claude/hooks/). Three hooks are included:
 
 | Hook | Event | What it does |
 |------|-------|--------------|
 | [`notify-done.sh`](.claude/hooks/notify-done.sh) | `Stop` | Plays a soft completion chime when Claude finishes a turn — by default staying quiet while background agents are still running. |
+| [`notify-ask.sh`](.claude/hooks/notify-ask.sh) | `Notification`, `PreToolUse` (AskUserQuestion) | Plays a two-blip attention chime when Claude is waiting on *you* — a permission prompt or an a) b) c) question. |
 | [`no-comment-metadata.sh`](.claude/hooks/no-comment-metadata.sh) | `PreToolUse` (Edit/Write/MultiEdit) | Blocks edits that put metadata in comments or add long comment blocks; asks on ambiguous cases and on oversized comments. |
 
 ## Install
@@ -26,6 +27,7 @@ See [`.claude/settings.example.json`](.claude/settings.example.json) for the exa
 
 ```bash
 tests/notify-done.test.sh   # no audio: a fake paplay on PATH records its args
+tests/notify-ask.test.sh
 ```
 
 ---
@@ -69,6 +71,17 @@ external tools. It scales a source WAV down and prepends the silence:
 `--amp` is a 0..1 multiplier (0.6 ≈ 14% peak). It reports the peak amplitude so
 you can check loudness without playing anything. Source must be 16-bit PCM WAV.
 
+`--skip`, `--clip`, `--repeat` and `--gap` shape the sound rather than its
+volume: drop seconds off the front, keep only the first N seconds (fading the cut
+so it doesn't click), and play it back more than once with silence between. That
+is how `claude-ask.wav` is built out of `claude-chime.wav`:
+
+```bash
+.claude/hooks/make-chime.py --src .claude/hooks/claude-chime.wav \
+  --amp 1.0 --skip 0.6 --clip 0.9 --lead 0.6 --repeat 2 --gap 0.12 \
+  --out .claude/hooks/claude-ask.wav
+```
+
 ### Background agents: what the chime actually means
 
 `Stop` fires whenever Claude hands the turn back, which includes handing it back
@@ -107,16 +120,63 @@ The remaining hole is an agent that dies without notifying at all. `NOTIFY_STALE
 the counter is treated as "nothing pending", so a broken detector goes back to
 chiming instead of going silent.
 
-### Fire only when Claude needs input (not every turn)
-
-Move the hook from `"Stop"` to `"Notification"` in `settings.json`. `Stop` fires
-when a turn ends; `Notification` fires when Claude is waiting on you.
-
 ### Non-WSL machines
 
-Swap the player in `notify-done.sh`: on native Linux use `paplay`/`aplay`
-directly against your normal PulseAudio/PipeWire; on macOS use
+Swap the player in `notify-done.sh` and `notify-ask.sh`: on native Linux use
+`paplay`/`aplay` directly against your normal PulseAudio/PipeWire; on macOS use
 `afplay claude-chime.wav`.
+
+---
+
+## `notify-ask.sh` — attention chime
+
+`Stop` announces that Claude *stopped*. It says nothing when Claude is stuck
+waiting on you mid-turn, which is exactly the moment worth hearing about: you've
+walked away, and the work is now blocked on a keystroke.
+
+Sound is `claude-ask.wav` — the same marimba struck **twice**, so "needs you" and
+"finished" are distinguishable without looking at the terminal. Everything else
+(WSLg PulseAudio, baked-in volume, leading silence, detached playback) works the
+same way as the completion chime above.
+
+### Two events, because no single one covers it
+
+| Event | Covers |
+| --- | --- |
+| `Notification` | permission prompts, including switching to auto-accept, and background agents asking for input |
+| `PreToolUse` matched to `AskUserQuestion` | the a) b) c) option picker |
+
+The second is not redundant. `AskUserQuestion` emits **no notification of any
+kind**, and the turn hasn't ended so `Stop` doesn't fire either — a question
+sitting on screen is otherwise completely silent. Matching it in `PreToolUse`
+fires the chime just before the picker renders.
+
+Permission prompts, by contrast, arrive through `Notification` — but on a **6
+second delay**, and only if you haven't already answered. Answer promptly and
+you never hear it; that's deliberate on Claude Code's side, not something this
+hook can tighten.
+
+### Which moments chime
+
+`Notification` payloads carry a `notification_type`, and that is what the hook
+filters on — set `NOTIFY_ASK_EVENTS` in `notify-done.conf` (or as an environment
+variable, which wins over the file) to a space-separated list:
+
+| Kind | Default | Meaning |
+| --- | --- | --- |
+| `question` | ✅ | the a) b) c) picker (synthetic — `PreToolUse`, not a real notification type) |
+| `permission_prompt` | ✅ | a tool Claude may not run unattended |
+| `worker_permission_prompt` | ✅ | the same, from a background worker |
+| `agent_needs_input` | ✅ | a background agent is stuck on a question |
+| `idle_prompt` | — | "Claude is waiting for your input", ~60s after a turn ends |
+| `agent_completed` | — | a background agent finished |
+
+`idle_prompt` is off because it re-announces a moment the `Stop` chime already
+announced, a minute later. Turn it on if you want the second nudge. Anything not
+in the list — auth, computer-use, MCP elicitation — is silent.
+
+`NOTIFY_ASK_MODE=off` disables the hook outright; `NOTIFY_ASK_CHIME=/path.wav`
+swaps the sound.
 
 ---
 

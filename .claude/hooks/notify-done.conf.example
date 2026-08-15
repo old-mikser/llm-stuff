@@ -14,3 +14,22 @@ NOTIFY_PENDING_VOLUME=22000
 # How long a launched agent stays counted without a completion notification.
 # Bounds the silence if an agent ever dies without one.
 NOTIFY_STALE_MINUTES=60
+
+# --- notify-ask.sh: the chime for when Claude is waiting on you --------------
+
+# on (default) — chime when Claude asks; off — never
+NOTIFY_ASK_MODE=on
+
+# Which moments chime. Space-separated; unlisted ones are silent.
+#   question                  a) b) c) option picker (AskUserQuestion)
+#   permission_prompt         a tool Claude may not run unattended
+#   worker_permission_prompt  same, from a background worker
+#   agent_needs_input         a background agent is stuck on a question
+#   idle_prompt               "waiting for your input", ~60s after a turn ends —
+#                             off by default, the Stop chime covered that already
+#   agent_completed           a background agent finished
+NOTIFY_ASK_EVENTS="question permission_prompt worker_permission_prompt agent_needs_input"
+
+# Sound to play. Default claude-ask.wav is two blips, so it doesn't sound like
+# the single completion chime. Any WAV works.
+NOTIFY_ASK_CHIME=
