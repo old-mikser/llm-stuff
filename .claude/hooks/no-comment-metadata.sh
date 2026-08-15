@@ -2,6 +2,8 @@
 # PreToolUse hook: blocks Edit/Write/MultiEdit to source files when the change
 #   (a) puts metadata inside a comment, or
 #   (b) would leave a run of 4+ consecutive comment lines. Doc comments count too.
+# Ambiguous metadata (bare IDs, changelog voice) can't be told from real code talk
+# by pattern alone, so it asks the user instead of blocking.
 # The edit is simulated against the on-disk file, so added lines landing next to
 # existing comment lines are counted together; only runs the edit touches are
 # flagged, never pre-existing ones elsewhere in the file.
@@ -107,6 +109,7 @@ if not text.strip():
 
 # --- Check (a): metadata inside any added comment line ---
 marker = re.compile(MARKERS[style])
+# Tier 1: keyword-anchored, unambiguous => hard block.
 meta = re.compile(
     r"plan\s*#?\s*[0-9]{3,4}"
     r"|phase\s+[0-9]+"
@@ -119,9 +122,29 @@ meta = re.compile(
     r"|[0-9]{4}-[0-9]{2}-[0-9]{2}",
     re.IGNORECASE,
 )
-meta_hits = [
-    ln for t in added_texts for ln in t.splitlines()
-    if marker.search(ln) and meta.search(ln)
+# Tier 2: could equally be a bitmask, an opcode or plain prose => ask, never block.
+suspect = re.compile(
+    r"\(\s*#?\s*[0-9]{4}\s*\)"  # bare parenthesised ID: "cleared it (0010)"
+    r"|\b(?:clear|remov|renam|bump|drop|mov|switch|replac|updat|delet|revert|split)ed"
+    r"\s+(?:it|this|that|these|those|them)\b",
+    re.IGNORECASE,
+)
+# A date in a URL or a spec version is describing the code, not stamping it.
+url = re.compile(r"\S+://\S+|\b\w+\.(?:io|com|org|net|dev)/\S*")
+spec_date = re.compile(r"\b(?:spec|version|rev|rfc|standard)\w*\s+[0-9]{4}-[0-9]{2}-[0-9]{2}", re.I)
+
+
+def scrub(ln):
+    return spec_date.sub("", url.sub("", ln))
+
+
+added_comment_lines = [
+    ln for t in added_texts for ln in t.splitlines() if marker.search(ln)
+]
+meta_hits = [ln for ln in added_comment_lines if meta.search(scrub(ln))]
+suspect_hits = [
+    ln for ln in added_comment_lines
+    if ln not in meta_hits and (suspect.search(ln) or spec_date.search(ln))
 ]
 
 # --- Check (b): run of 4+ consecutive comment lines touching the edit ---
@@ -173,6 +196,15 @@ for i, ln in enumerate(lines):
 flush(len(lines))
 
 if not meta_hits and not long_runs:
+    if suspect_hits:
+        reason = "Possible metadata stamp in a comment (AGENTS.md § Code comments policy):\n"
+        reason += "\n".join("  " + ln.strip() for ln in suspect_hits)
+        reason += "\nAllow if the comment describes the code; reject if it records the change."
+        json.dump({"hookSpecificOutput": {
+            "hookEventName": "PreToolUse",
+            "permissionDecision": "ask",
+            "permissionDecisionReason": reason,
+        }}, sys.stdout)
     sys.exit(0)
 
 if meta_hits:

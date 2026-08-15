@@ -7,7 +7,7 @@ Everything lives under [`.claude/hooks/`](.claude/hooks/). Two hooks are include
 | Hook | Event | What it does |
 |------|-------|--------------|
 | [`notify-done.sh`](.claude/hooks/notify-done.sh) | `Stop` | Plays a soft completion chime when Claude finishes a turn. |
-| [`no-comment-metadata.sh`](.claude/hooks/no-comment-metadata.sh) | `PostToolUse` (Edit/Write/MultiEdit) | Blocks edits that put metadata in comments or add long comment blocks. |
+| [`no-comment-metadata.sh`](.claude/hooks/no-comment-metadata.sh) | `PreToolUse` (Edit/Write/MultiEdit) | Blocks edits that put metadata in comments or add long comment blocks; asks on ambiguous cases. |
 
 ## Install
 
@@ -88,6 +88,28 @@ back to Claude) when the change:
 - **(b)** would leave a run of **4+ consecutive** comment lines — doc comments
   (`///`, `//!`, `/** */`) count too, so long doc blocks are blocked as well.
 
+### Two confidence tiers
+
+Some metadata can't be told from ordinary code talk by pattern alone. `cleared it
+(0010)` is a stamp; `mask (0010) selects the second lane` is a bitmask — same
+shape, and only the author's intent separates them. Hard-blocking that shape
+would reject correct edits with no way to override, so the hook splits by
+confidence:
+
+| Tier | Matches | Verdict |
+| --- | --- | --- |
+| 1 | keyword-anchored: `plan 0071`, `task #12`, `phase 3`, ISO dates, `added in` / `fixed by` | **deny** — exit 2, edit blocked, reason fed back to Claude |
+| 2 | bare parenthesised 4-digit IDs, changelog voice (`cleared/renamed/bumped it`), spec-version dates | **ask** — `permissionDecision: "ask"` JSON on stdout, you decide |
+
+Tier 2 is a smoke detector, not a lock: a false positive costs one keypress
+instead of an argument with the agent. Tier 1 skips dates inside URLs
+(`…/specification/2025-06-18/`), which are describing the code, not stamping it.
+A tier-1 hit always wins over a tier-2 one on the same edit.
+
+Measured over ~95k comment lines of real source, tier 2 fires on 0.06% of comment
+lines; on a codebase with no metadata convention at all (`llama.cpp`), tier 1
+fires 4 times in 11.3k comment lines and tier 2 five times.
+
 For check (b) the hook simulates the edit against the on-disk file (splicing
 `new_string` over `old_string`, including `replace_all` and sequential
 `MultiEdit` edits), so a short comment added next to existing comment lines is
@@ -98,5 +120,6 @@ text in isolation.
 
 It's comment-syntax aware per file extension (`.rs .js .ts .jsx .tsx .go .php .py
 .css .html`). The intent: keep history in git and planning docs, not in code
-comments, and discourage over-commenting. Tune `MAX_COMMENT_LINES` and the
-`meta` regex at the top of the script to taste.
+comments, and discourage over-commenting. Tune `MAX_COMMENT_LINES` and the `meta`
+(tier 1) / `suspect` (tier 2) regexes at the top of the script to taste — move a
+pattern between them to change whether it blocks or asks.
