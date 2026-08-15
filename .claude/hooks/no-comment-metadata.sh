@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 # PreToolUse hook: blocks Edit/Write/MultiEdit to source files when the change
-#   (a) puts metadata inside a comment, or
-#   (b) would leave a run of 4+ consecutive comment lines. Doc comments count too.
-# Two softer signals only ask: ambiguous metadata (bare IDs, changelog voice) can't
-# be told from real code talk by pattern alone, and a 2-3 line comment sitting on a
-# one-line statement may still be earning its keep.
+#   (a) puts metadata inside a comment,
+#   (b) would leave a run of 4+ consecutive comment lines, or
+#   (c) puts a full 3-line comment on a one-line statement. Doc comments count too.
+# One softer signal only asks: ambiguous metadata (bare IDs, changelog voice) can't
+# be told from real code talk by pattern alone.
 # The edit is simulated against the on-disk file (a Write is diffed against it, so
 # only genuinely new lines are checked), and added lines landing next to existing
 # comment lines are counted together; only runs the change touches are flagged,
@@ -237,10 +237,10 @@ flush(len(lines))
 
 long_runs = [(s + 1, lines[s:e]) for s, e in touched_runs if e - s > MAX_COMMENT_LINES]
 
-# --- Check (c): multi-line comment on a one-liner ---
-# Heuristic, so it only ever asks. Every ambiguous case gets the larger budget:
-# a declaration, a blank-line gap (section header), a doc comment or no target
-# at all is left alone, and only a run sitting on a short statement is queried.
+# --- Check (c): 3-line comment on a one-liner ---
+# Every ambiguous case gets the larger budget: a declaration, a blank-line gap
+# (section header), a doc comment or no target at all is left alone, and 1-2 lines
+# are always fine; only a full 3-line run on a short statement is blocked.
 DECL = re.compile(
     r"^(?:(?:pub|pub\(\w+\)|export|default|async|static|final|abstract|public|private"
     r"|protected|const|unsafe|extern|inline|virtual|override)\s+)*"
@@ -303,7 +303,7 @@ def extent(i):
 
 oversized = []
 for s, e in touched_runs:
-    if not 2 <= e - s <= MAX_COMMENT_LINES:
+    if e - s != MAX_COMMENT_LINES:
         continue
     if lines[s].lstrip().startswith(DOC):
         continue
@@ -313,25 +313,15 @@ for s, e in touched_runs:
     if extent(t) < BLOCK_EXTENT:
         oversized.append((s + 1, lines[s:e], t + 1, lines[t].strip()))
 
-if not meta_hits and not long_runs:
-    reasons = []
+if not meta_hits and not long_runs and not oversized:
     if suspect_hits:
         r = "Possible metadata stamp in a comment (AGENTS.md § Code comments policy):\n"
         r += "\n".join("  " + ln for ln in clipped(suspect_hits))
         r += "\nAllow if the comment describes the code; reject if it records the change."
-        reasons.append(r)
-    for start, blk, tline, target in oversized:
-        r = f"{len(blk)} comment lines on what looks like a one-liner "
-        r += "(AGENTS.md § Code comments policy: write fewer comments).\n"
-        r += "\n".join("  " + ln for ln in clipped(blk))
-        r += f"\n  line {tline}: {target}\n"
-        r += "Allow if the code is genuinely subtle; reject and cut it to one line if not."
-        reasons.append(r)
-    if reasons:
         json.dump({"hookSpecificOutput": {
             "hookEventName": "PreToolUse",
             "permissionDecision": "ask",
-            "permissionDecisionReason": "\n\n".join(reasons),
+            "permissionDecisionReason": r,
         }}, sys.stdout)
     sys.exit(0)
 
@@ -348,6 +338,15 @@ if long_runs:
         print(f"  lines {start}-{start + len(blk) - 1} ({len(blk)} comment lines):", file=sys.stderr)
         for ln in clipped(blk):
             print("    " + ln, file=sys.stderr)
+
+if oversized:
+    print(f"BLOCKED: {MAX_COMMENT_LINES} comment lines on a one-liner in {path} (AGENTS.md § Code comments policy: write fewer comments).", file=sys.stderr)
+    print("Cut it to one or two lines. Declarations and section headers are exempt; a plain short statement is not.", file=sys.stderr)
+    for start, blk, tline, target in oversized:
+        print(f"  lines {start}-{start + len(blk) - 1}:", file=sys.stderr)
+        for ln in clipped(blk):
+            print("    " + ln, file=sys.stderr)
+        print(f"  line {tline}: {target}", file=sys.stderr)
 
 print("The edit was NOT applied. Trim the comments and retry.", file=sys.stderr)
 sys.exit(2)

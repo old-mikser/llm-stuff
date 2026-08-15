@@ -8,7 +8,7 @@ Everything lives under [`.claude/hooks/`](.claude/hooks/). Three hooks are inclu
 |------|-------|--------------|
 | [`notify-done.sh`](.claude/hooks/notify-done.sh) | `Stop` | Plays a soft completion chime when Claude finishes a turn — by default staying quiet while background agents are still running. |
 | [`notify-ask.sh`](.claude/hooks/notify-ask.sh) | `Notification`, `PreToolUse` (AskUserQuestion) | Plays a two-blip attention chime when Claude is waiting on *you* — a permission prompt or an a) b) c) question. |
-| [`no-comment-metadata.sh`](.claude/hooks/no-comment-metadata.sh) | `PreToolUse` (Edit/Write/MultiEdit) | Blocks edits that put metadata in comments or add long comment blocks; asks on ambiguous cases and on oversized comments. |
+| [`no-comment-metadata.sh`](.claude/hooks/no-comment-metadata.sh) | `PreToolUse` (Edit/Write/MultiEdit) | Blocks edits that put metadata in comments, add long comment blocks, or over-comment a one-liner; asks on ambiguous metadata. |
 
 ## Install
 
@@ -28,6 +28,7 @@ See [`.claude/settings.example.json`](.claude/settings.example.json) for the exa
 ```bash
 tests/notify-done.test.sh   # no audio: a fake paplay on PATH records its args
 tests/notify-ask.test.sh
+tests/no-comment-metadata.test.sh   # builds sample files in a temp dir
 ```
 
 ---
@@ -206,10 +207,9 @@ back to Claude) when the change:
 - **(a)** puts metadata inside a comment — dates (`YYYY-MM-DD`), plan/phase/wave
   numbers, task IDs, or phrases like `added in` / `fixed by` / `review fix`; or
 - **(b)** would leave a run of **4+ consecutive** comment lines — doc comments
-  (`///`, `//!`, `/** */`) count too, so long doc blocks are blocked as well.
-
-A third check, **(c)**, only ever *asks*: a 2–3 line comment run sitting on a
-single-line statement. See [Sizing a comment to its code](#sizing-a-comment-to-its-code).
+  (`///`, `//!`, `/** */`) count too, so long doc blocks are blocked as well; or
+- **(c)** puts a **3-line** comment run on a single-line statement. One and two
+  lines are always fine. See [Sizing a comment to its code](#sizing-a-comment-to-its-code).
 
 ### Two confidence tiers
 
@@ -245,14 +245,12 @@ n = min(n, 255);` usually isn't. Check (c) tries to tell those apart without a
 parser: it finds the run's **target** — the next code line, skipping attributes
 and decorators like `#[derive(…)]` or `@cache` — and measures that statement's
 **extent**, following bracket depth and then indentation. Under 3 lines, the
-target is a one-liner and 2–3 comment lines on it prompt an **ask**.
+target is a one-liner, and a full 3-line comment run on it is **blocked**.
 
-The heuristic is deliberately lopsided. Allowing a comment that could have been
-shorter costs two lines; demanding brevity where an explanation was needed costs
-the explanation — and the one-liners that most need three lines of prose (a
-gnarly regex, a magic constant, a workaround for someone else's bug) are exactly
-the ones with the least code to measure. So every ambiguous case gets the larger
-budget and is passed silently:
+The budget is two lines, not zero. A one-liner that genuinely needs explaining —
+a gnarly regex, a magic constant, a workaround for someone else's bug — gets its
+two lines and passes silently; the third is what marks prose that outgrew its
+code. Every ambiguous case gets the larger budget and is passed silently too:
 
 | Situation | Why it's exempt |
 | --- | --- |
@@ -261,12 +259,11 @@ budget and is passed silently:
 | No target — run ends the file or the block | Nothing to measure |
 | Run opens with `///`, `//!`, `/**` | Doc comment, attached to a declaration by definition |
 
-And it never blocks. A false positive costs one keypress, and the ask rate is
-its own calibration signal: if you're approving nearly all of them, tighten
-`BLOCK_EXTENT` or drop the check; if you're rejecting nearly all of them,
-promote it to a deny.
+Tune it with `BLOCK_EXTENT` (how many lines of code count as a one-liner) and
+`MAX_COMMENT_LINES`, which sets both the 4+ run limit in (b) and the exact run
+length (c) rejects.
 
-For check (b) the hook simulates the edit against the on-disk file. `Edit`/`MultiEdit`
+For checks (b) and (c) the hook simulates the edit against the on-disk file. `Edit`/`MultiEdit`
 splice `new_string` over `old_string` (including `replace_all` and sequential
 edits); a `Write` is instead diffed against the on-disk file with `difflib`, so
 only lines the write actually adds count — a pre-existing comment run the
