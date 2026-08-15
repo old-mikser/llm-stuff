@@ -106,12 +106,13 @@ finishing wakes Claude up, and the chime lands when *that* follow-up turn ends.
 
 [`pending-agents.py`](.claude/hooks/pending-agents.py) does the counting, reading
 the session transcript that the hook payload points at. A launch shows up as a
-tool result carrying `isAsync` and an `agentId`; the matching completion arrives
-later as a `task-notification` carrying `<task-id>`. Two consequences worth
-knowing:
+tool result carrying an `agentId` plus either `isAsync` (the **Agent** tool) or
+`background` (a skill forked into the background, such as `/code-review`); the
+matching completion arrives later as a `task-notification` carrying `<task-id>`.
+Two consequences worth knowing:
 
-- Only the **Agent** tool writes `isAsync`. A background `Bash` — a dev server
-  that's meant to run for hours — is deliberately not counted, or it would hold
+- The `agentId` is what separates those from a background `Bash` — a dev server
+  that's meant to run for hours is deliberately not counted, or it would hold
   the chime hostage for as long as it lives.
 - Killed and failed agents get a notification too, so stopping one releases the
   chime rather than silencing the session for good.

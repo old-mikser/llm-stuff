@@ -36,6 +36,14 @@ launch() { # agentId toolUseId timestamp
     printf '{"type":"user","timestamp":"%s","toolUseResult":{"isAsync":true,"status":"async_launched","agentId":"%s"},"message":{"content":[{"type":"tool_result","tool_use_id":"%s","content":"Async agent launched successfully."}]}}\n' "$3" "$1" "$2"
 }
 
+fork() { # agentId toolUseId timestamp — a skill launched into the background
+    printf '{"type":"user","timestamp":"%s","toolUseResult":{"success":true,"commandName":"code-review","status":"forked","background":true,"agentId":"%s"},"message":{"content":[{"type":"tool_result","tool_use_id":"%s","content":"Running in the background as @code-review"}]}}\n' "$3" "$1" "$2"
+}
+
+bg_bash() { # timestamp — a background shell, which has no agentId
+    printf '{"type":"user","timestamp":"%s","toolUseResult":{"shellId":"bash_1","background":true,"stdout":"","stderr":""},"message":{"content":[{"type":"tool_result","tool_use_id":"toolu_bg","content":"running"}]}}\n' "$1"
+}
+
 notify() { # body
     printf '{"type":"user","origin":{"kind":"task-notification"},"message":{"content":"%s"}}\n' "$1"
 }
@@ -76,6 +84,16 @@ done
   launch a2 toolu_2 "2026-08-15T11:59:30Z"
   notify "<task-id>a1</task-id><status>completed</status>"; } >"$T"
 check "only the unreported agent is counted" "1" "$(count "$T")"
+
+fork a1 toolu_1 "2026-08-15T11:59:00Z" >"$T"
+check "a backgrounded skill is pending too" "1" "$(count "$T")"
+
+{ fork a1 toolu_1 "2026-08-15T11:59:00Z"
+  notify "<task-id>a1</task-id><status>completed</status>"; } >"$T"
+check "the skill's completion clears it" "0" "$(count "$T")"
+
+bg_bash "2026-08-15T11:59:00Z" >"$T"
+check "a background shell never counts" "0" "$(count "$T")"
 
 launch a1 toolu_1 "2026-08-15T09:00:00Z" >"$T"
 check "an agent older than the window is dropped" "0" "$(count "$T")"

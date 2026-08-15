@@ -9,9 +9,11 @@ going permanently silent.
 
 Two markers in the transcript, both on `user` entries:
 
-  launch     `toolUseResult.isAsync` with an `agentId` — only the Agent tool in
-             background mode writes this, so a long-lived background Bash (a dev
-             server that never exits) can't wedge the count above zero.
+  launch     `toolUseResult.isAsync` (Agent tool) or `toolUseResult.background`
+             (a skill forked into the background, e.g. `/code-review`), in both
+             cases carrying an `agentId`. Requiring the `agentId` keeps a
+             long-lived background Bash — a dev server that never exits — from
+             wedging the count above zero.
   completion `origin.kind == "task-notification"`, carrying `<task-id>` and
              usually `<tool-use-id>`. Emitted for killed and failed agents too,
              so stopping an agent clears it.
@@ -79,7 +81,7 @@ def pending(path):
                 continue
 
             result = entry.get("toolUseResult")
-            if isinstance(result, dict) and result.get("isAsync"):
+            if isinstance(result, dict) and (result.get("isAsync") or result.get("background")):
                 agent_id = result.get("agentId")
                 if agent_id:
                     tool_use = tool_use_id_of(entry)
