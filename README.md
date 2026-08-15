@@ -7,7 +7,7 @@ Everything lives under [`.claude/hooks/`](.claude/hooks/). Two hooks are include
 | Hook | Event | What it does |
 |------|-------|--------------|
 | [`notify-done.sh`](.claude/hooks/notify-done.sh) | `Stop` | Plays a soft completion chime when Claude finishes a turn. |
-| [`no-comment-metadata.sh`](.claude/hooks/no-comment-metadata.sh) | `PreToolUse` (Edit/Write/MultiEdit) | Blocks edits that put metadata in comments or add long comment blocks; asks on ambiguous cases. |
+| [`no-comment-metadata.sh`](.claude/hooks/no-comment-metadata.sh) | `PreToolUse` (Edit/Write/MultiEdit) | Blocks edits that put metadata in comments or add long comment blocks; asks on ambiguous cases and on oversized comments. |
 
 ## Install
 
@@ -88,6 +88,9 @@ back to Claude) when the change:
 - **(b)** would leave a run of **4+ consecutive** comment lines — doc comments
   (`///`, `//!`, `/** */`) count too, so long doc blocks are blocked as well.
 
+A third check, **(c)**, only ever *asks*: a 2–3 line comment run sitting on a
+single-line statement. See [Sizing a comment to its code](#sizing-a-comment-to-its-code).
+
 ### Two confidence tiers
 
 Some metadata can't be told from ordinary code talk by pattern alone. `cleared it
@@ -110,6 +113,34 @@ Measured over ~95k comment lines of real source, tier 2 fires on 0.06% of commen
 lines; on a codebase with no metadata convention at all (`llama.cpp`), tier 1
 fires 4 times in 11.3k comment lines and tier 2 five times.
 
+### Sizing a comment to its code
+
+Three lines of comment above a function is proportionate; three lines above `let
+n = min(n, 255);` usually isn't. Check (c) tries to tell those apart without a
+parser: it finds the run's **target** — the next code line, skipping attributes
+and decorators like `#[derive(…)]` or `@cache` — and measures that statement's
+**extent**, following bracket depth and then indentation. Under 3 lines, the
+target is a one-liner and 2–3 comment lines on it prompt an **ask**.
+
+The heuristic is deliberately lopsided. Allowing a comment that could have been
+shorter costs two lines; demanding brevity where an explanation was needed costs
+the explanation — and the one-liners that most need three lines of prose (a
+gnarly regex, a magic constant, a workaround for someone else's bug) are exactly
+the ones with the least code to measure. So every ambiguous case gets the larger
+budget and is passed silently:
+
+| Situation | Why it's exempt |
+| --- | --- |
+| Target matches a declaration head (`fn`, `def`, `class`, `impl`, `struct`, `type`, …) | Comment is documenting an interface |
+| Blank line between comment and code | It's a section header, not attached to a statement |
+| No target — run ends the file or the block | Nothing to measure |
+| Run opens with `///`, `//!`, `/**` | Doc comment, attached to a declaration by definition |
+
+And it never blocks. A false positive costs one keypress, and the ask rate is
+its own calibration signal: if you're approving nearly all of them, tighten
+`BLOCK_EXTENT` or drop the check; if you're rejecting nearly all of them,
+promote it to a deny.
+
 For check (b) the hook simulates the edit against the on-disk file (splicing
 `new_string` over `old_string`, including `replace_all` and sequential
 `MultiEdit` edits), so a short comment added next to existing comment lines is
@@ -120,6 +151,7 @@ text in isolation.
 
 It's comment-syntax aware per file extension (`.rs .js .ts .jsx .tsx .go .php .py
 .css .html`). The intent: keep history in git and planning docs, not in code
-comments, and discourage over-commenting. Tune `MAX_COMMENT_LINES` and the `meta`
+comments, and discourage over-commenting. Tune `MAX_COMMENT_LINES`, `BLOCK_EXTENT`
+and the `meta`
 (tier 1) / `suspect` (tier 2) regexes at the top of the script to taste — move a
 pattern between them to change whether it blocks or asks.

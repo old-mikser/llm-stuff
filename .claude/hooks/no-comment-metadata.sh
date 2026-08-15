@@ -2,8 +2,9 @@
 # PreToolUse hook: blocks Edit/Write/MultiEdit to source files when the change
 #   (a) puts metadata inside a comment, or
 #   (b) would leave a run of 4+ consecutive comment lines. Doc comments count too.
-# Ambiguous metadata (bare IDs, changelog voice) can't be told from real code talk
-# by pattern alone, so it asks the user instead of blocking.
+# Two softer signals only ask: ambiguous metadata (bare IDs, changelog voice) can't
+# be told from real code talk by pattern alone, and a 2-3 line comment sitting on a
+# one-line statement may still be earning its keep.
 # The edit is simulated against the on-disk file, so added lines landing next to
 # existing comment lines are counted together; only runs the edit touches are
 # flagged, never pre-existing ones elsewhere in the file.
@@ -11,6 +12,7 @@
 import bisect, json, os, re, sys
 
 MAX_COMMENT_LINES = 3  # 4+ in a row is blocked
+BLOCK_EXTENT = 3  # code shorter than this is a one-liner: 1 comment line is enough
 
 # style: line-comment prefixes, block (open, close)
 STYLES = {
@@ -165,12 +167,12 @@ b_open, b_close = block if block else (None, None)
 in_block = False
 run = 0
 run_start = 0
-long_runs = []
+touched_runs = []
 
 def flush(i):
     global run
-    if run >= MAX_COMMENT_LINES + 1 and any(j in added_lines for j in range(run_start, i)):
-        long_runs.append((run_start + 1, lines[run_start:i]))
+    if run and any(j in added_lines for j in range(run_start, i)):
+        touched_runs.append((run_start, i))
     run = 0
 
 for i, ln in enumerate(lines):
@@ -195,15 +197,103 @@ for i, ln in enumerate(lines):
         flush(i)
 flush(len(lines))
 
+long_runs = [(s + 1, lines[s:e]) for s, e in touched_runs if e - s > MAX_COMMENT_LINES]
+
+# --- Check (c): multi-line comment on a one-liner ---
+# Heuristic, so it only ever asks. Every ambiguous case gets the larger budget:
+# a declaration, a blank-line gap (section header), a doc comment or no target
+# at all is left alone, and only a run sitting on a short statement is queried.
+DECL = re.compile(
+    r"^(?:(?:pub|pub\(\w+\)|export|default|async|static|final|abstract|public|private"
+    r"|protected|const|unsafe|extern|inline|virtual|override)\s+)*"
+    r"(?:fn|def|class|impl|trait|struct|enum|interface|type|func|function|module"
+    r"|namespace|record|union|macro_rules!)\b"
+)
+ATTR = re.compile(r"^(?:#!?\[|@\w|[)\]}])")
+DOC = ("///", "//!", "/**")
+
+
+def strip_noise(ln):
+    ln = re.sub(r"'(?:\\.|[^'])*'|\"(?:\\.|[^\"])*\"", "", ln)
+    for p in line_prefixes:
+        k = ln.find(p)
+        if k >= 0:
+            ln = ln[:k]
+    return ln
+
+
+def indent_of(ln):
+    return len(ln) - len(ln.lstrip())
+
+
+def find_target(end):
+    """First code line the run introduces, and whether a blank line separates them."""
+    gap = False
+    for i in range(end, len(lines)):
+        s = lines[i].strip()
+        if not s:
+            gap = True
+        elif ATTR.match(s):
+            continue
+        else:
+            return i, gap
+    return None, gap
+
+
+def extent(i):
+    """Non-blank lines spanned by the statement starting at line i."""
+    base = indent_of(lines[i])
+    depth = sum(strip_noise(lines[i]).count(c) for c in "([{")
+    depth -= sum(strip_noise(lines[i]).count(c) for c in ")]}")
+    n, j = 1, i + 1
+    while j < len(lines):
+        s = lines[j].strip()
+        if not s:
+            if depth <= 0:
+                break
+        elif depth > 0:
+            n += 1
+            depth += sum(strip_noise(lines[j]).count(c) for c in "([{")
+            depth -= sum(strip_noise(lines[j]).count(c) for c in ")]}")
+        elif indent_of(lines[j]) > base:
+            n += 1
+        else:
+            break
+        j += 1
+    return n
+
+
+oversized = []
+for s, e in touched_runs:
+    if not 2 <= e - s <= MAX_COMMENT_LINES:
+        continue
+    if lines[s].lstrip().startswith(DOC):
+        continue
+    t, gap = find_target(e)
+    if t is None or gap or DECL.match(lines[t].lstrip()):
+        continue
+    if extent(t) < BLOCK_EXTENT:
+        oversized.append((s + 1, lines[s:e], t + 1, lines[t].strip()))
+
 if not meta_hits and not long_runs:
+    reasons = []
     if suspect_hits:
-        reason = "Possible metadata stamp in a comment (AGENTS.md § Code comments policy):\n"
-        reason += "\n".join("  " + ln.strip() for ln in suspect_hits)
-        reason += "\nAllow if the comment describes the code; reject if it records the change."
+        r = "Possible metadata stamp in a comment (AGENTS.md § Code comments policy):\n"
+        r += "\n".join("  " + ln.strip() for ln in suspect_hits)
+        r += "\nAllow if the comment describes the code; reject if it records the change."
+        reasons.append(r)
+    for start, blk, tline, target in oversized:
+        r = f"{len(blk)} comment lines on what looks like a one-liner "
+        r += "(AGENTS.md § Code comments policy: write fewer comments).\n"
+        r += "\n".join("  " + ln.strip() for ln in blk)
+        r += f"\n  line {tline}: {target}\n"
+        r += "Allow if the code is genuinely subtle; reject and cut it to one line if not."
+        reasons.append(r)
+    if reasons:
         json.dump({"hookSpecificOutput": {
             "hookEventName": "PreToolUse",
             "permissionDecision": "ask",
-            "permissionDecisionReason": reason,
+            "permissionDecisionReason": "\n\n".join(reasons),
         }}, sys.stdout)
     sys.exit(0)
 
