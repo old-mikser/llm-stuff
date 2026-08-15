@@ -178,6 +178,22 @@ in the list — auth, computer-use, MCP elicitation — is silent.
 `NOTIFY_ASK_MODE=off` disables the hook outright; `NOTIFY_ASK_CHIME=/path.wav`
 swaps the sound.
 
+### Where this deliberately stops
+
+A question typed as prose isn't a tool call, so it gets no two-blip chime — it
+ends the turn like anything else and the `Stop` chime covers it. And if a
+background agent is still running, `quiet` mode swallows even that, leaving a
+pending prose question silent.
+
+Both are intended. The work isn't finished while an agent is still going, so the
+answer can wait for the chime that lands when it reports back; and a chime only
+has to fetch you, not tell you in advance what's waiting. The two-blip sound is
+reserved for the moments Claude genuinely cannot move without you.
+
+So: no heuristics here for guessing whether prose was a question. A hook that
+sometimes chimes at rhetorical questions and stays quiet at "let me know which
+you prefer" is worse than one whose silence you can rely on.
+
 ---
 
 ## `no-comment-metadata.sh` — comment policy enforcement
