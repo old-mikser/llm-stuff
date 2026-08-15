@@ -5,14 +5,16 @@
 # Two softer signals only ask: ambiguous metadata (bare IDs, changelog voice) can't
 # be told from real code talk by pattern alone, and a 2-3 line comment sitting on a
 # one-line statement may still be earning its keep.
-# The edit is simulated against the on-disk file, so added lines landing next to
-# existing comment lines are counted together; only runs the edit touches are
-# flagged, never pre-existing ones elsewhere in the file.
+# The edit is simulated against the on-disk file (a Write is diffed against it, so
+# only genuinely new lines are checked), and added lines landing next to existing
+# comment lines are counted together; only runs the change touches are flagged,
+# never pre-existing ones elsewhere. Evidence printed per finding is capped.
 # Language-aware comment syntax. Reads hook JSON on stdin; exit 2 + stderr => fed back to Claude.
-import bisect, json, os, re, sys
+import bisect, difflib, json, os, re, sys
 
 MAX_COMMENT_LINES = 3  # 4+ in a row is blocked
 BLOCK_EXTENT = 3  # code shorter than this is a one-liner: 1 comment line is enough
+MAX_SHOWN = 5  # lines of evidence printed per finding; the rest is elided
 
 # style: line-comment prefixes, block (open, close)
 STYLES = {
@@ -86,10 +88,22 @@ style = EXT_STYLE.get(ext)
 if style is None:
     sys.exit(0)
 
-if "content" in ti:  # Write: content is the whole resulting file
-    added_texts = [ti.get("content") or ""]
-    text = added_texts[0]
-    spans = [(0, len(text))]
+lines_added = None  # Write fills this with 0-based indices of new lines
+if "content" in ti:  # Write: diff against the on-disk file; only new lines count
+    text = ti.get("content") or ""
+    new_lines = text.split("\n")
+    try:
+        with open(path, encoding="utf-8", errors="replace") as f:
+            old_lines = f.read().split("\n")
+    except OSError:  # new file: every line is new
+        old_lines = []
+    lines_added = set(range(len(new_lines)))
+    matcher = difflib.SequenceMatcher(a=old_lines, b=new_lines, autojunk=False)
+    for tag, _i1, _i2, j1, j2 in matcher.get_opcodes():
+        if tag == "equal":
+            lines_added.difference_update(range(j1, j2))
+    added_texts = ["\n".join(new_lines[i] for i in sorted(lines_added))]
+    spans = []
 else:  # Edit / MultiEdit
     edits = ti.get("edits") or ([ti] if ti.get("old_string") or ti.get("new_string") else [])
     added_texts = [e.get("new_string") or "" for e in edits]
@@ -114,19 +128,18 @@ marker = re.compile(MARKERS[style])
 # Tier 1: keyword-anchored, unambiguous => hard block.
 meta = re.compile(
     r"plan\s*#?\s*[0-9]{3,4}"
-    r"|phase\s+[0-9]+"
-    r"|wave\s+[0-9]+"
     r"|added in\b"
     r"|fixed (by|in)\b"
     r"|review fix"
     r"|see plan"
-    r"|task\s*#?\s*[0-9]+"
     r"|[0-9]{4}-[0-9]{2}-[0-9]{2}",
     re.IGNORECASE,
 )
 # Tier 2: could equally be a bitmask, an opcode or plain prose => ask, never block.
 suspect = re.compile(
     r"\(\s*#?\s*[0-9]{4}\s*\)"  # bare parenthesised ID: "cleared it (0010)"
+    r"|\b(?:phase|wave)\s+[0-9]+\b"
+    r"|\btask\s*#?\s*[0-9]+\b"
     r"|\b(?:clear|remov|renam|bump|drop|mov|switch|replac|updat|delet|revert|split)ed"
     r"\s+(?:it|this|that|these|those|them)\b",
     re.IGNORECASE,
@@ -140,8 +153,26 @@ def scrub(ln):
     return spec_date.sub("", url.sub("", ln))
 
 
+STR = re.compile(r"'(?:\\.|[^'\\])*'|\"(?:\\.|[^\"\\])*\"")
+
+
+def comment_part(ln):
+    """Text of ln from the first comment marker onward. String literals are
+    removed first, so markers and dates inside strings never count."""
+    bare = STR.sub("", ln)
+    m = marker.search(bare)
+    return bare[m.start():] if m else ""
+
+
+def clipped(seq):
+    out = [x.strip() if isinstance(x, str) else x for x in seq[:MAX_SHOWN]]
+    if len(seq) > MAX_SHOWN:
+        out.append(f"… {len(seq) - MAX_SHOWN} more line(s)")
+    return out
+
+
 added_comment_lines = [
-    ln for t in added_texts for ln in t.splitlines() if marker.search(ln)
+    cp for t in added_texts for ln in t.splitlines() if (cp := comment_part(ln))
 ]
 meta_hits = [ln for ln in added_comment_lines if meta.search(scrub(ln))]
 suspect_hits = [
@@ -156,11 +187,14 @@ for ln in lines:
     starts.append(off)
     off += len(ln) + 1
 
-added_lines = set()
-for s, e in spans:
-    a = bisect.bisect_right(starts, s) - 1
-    b = bisect.bisect_right(starts, max(s, e - 1)) - 1
-    added_lines.update(range(a, b + 1))
+if lines_added is not None:
+    added_lines = lines_added
+else:
+    added_lines = set()
+    for s, e in spans:
+        a = bisect.bisect_right(starts, s) - 1
+        b = bisect.bisect_right(starts, max(s, e - 1)) - 1
+        added_lines.update(range(a, b + 1))
 
 line_prefixes, block = STYLES[style]
 b_open, b_close = block if block else (None, None)
@@ -177,6 +211,9 @@ def flush(i):
 
 for i, ln in enumerate(lines):
     s = ln.lstrip()
+    if i == 0 and s.startswith("#!") and "#" in line_prefixes:
+        flush(i)
+        continue
     is_comment = False
     if in_block:
         is_comment = True
@@ -279,13 +316,13 @@ if not meta_hits and not long_runs:
     reasons = []
     if suspect_hits:
         r = "Possible metadata stamp in a comment (AGENTS.md § Code comments policy):\n"
-        r += "\n".join("  " + ln.strip() for ln in suspect_hits)
+        r += "\n".join("  " + ln for ln in clipped(suspect_hits))
         r += "\nAllow if the comment describes the code; reject if it records the change."
         reasons.append(r)
     for start, blk, tline, target in oversized:
         r = f"{len(blk)} comment lines on what looks like a one-liner "
         r += "(AGENTS.md § Code comments policy: write fewer comments).\n"
-        r += "\n".join("  " + ln.strip() for ln in blk)
+        r += "\n".join("  " + ln for ln in clipped(blk))
         r += f"\n  line {tline}: {target}\n"
         r += "Allow if the code is genuinely subtle; reject and cut it to one line if not."
         reasons.append(r)
@@ -299,17 +336,17 @@ if not meta_hits and not long_runs:
 
 if meta_hits:
     print(f"BLOCKED: comment metadata in {path} (AGENTS.md § Code comments policy).", file=sys.stderr)
-    print("No dates, plan/phase/wave numbers, task IDs, or 'added in / fixed by / review fix' in code comments.", file=sys.stderr)
-    for ln in meta_hits:
-        print("  " + ln.strip(), file=sys.stderr)
+    print("No dates, plan numbers, or 'added in / fixed by / review fix / see plan' in code comments.", file=sys.stderr)
+    for ln in clipped(meta_hits):
+        print("  " + ln, file=sys.stderr)
 
 if long_runs:
     print(f"BLOCKED: this edit would leave a comment run over {MAX_COMMENT_LINES} lines in {path} (AGENTS.md § Code comments policy: write fewer comments).", file=sys.stderr)
     print("Counting adjacent existing comment lines too. Cut it down. Doc comments are not exempt.", file=sys.stderr)
     for start, blk in long_runs:
         print(f"  lines {start}-{start + len(blk) - 1} ({len(blk)} comment lines):", file=sys.stderr)
-        for ln in blk:
-            print("    " + ln.strip(), file=sys.stderr)
+        for ln in clipped(blk):
+            print("    " + ln, file=sys.stderr)
 
 print("The edit was NOT applied. Trim the comments and retry.", file=sys.stderr)
 sys.exit(2)

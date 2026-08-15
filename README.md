@@ -83,8 +83,8 @@ a `PreToolUse` hook on every `Edit`/`Write`/`MultiEdit`. It reads the hook JSON 
 stdin and **blocks the edit before it lands** (exit code 2, with the reason sent
 back to Claude) when the change:
 
-- **(a)** puts metadata inside a comment — dates (`YYYY-MM-DD`), plan/phase/wave
-  numbers, task IDs, or phrases like `added in` / `fixed by` / `review fix`; or
+- **(a)** puts metadata inside a comment — dates (`YYYY-MM-DD`), a `plan` number,
+  or phrases like `added in` / `fixed by` / `review fix` / `see plan`; or
 - **(b)** would leave a run of **4+ consecutive** comment lines — doc comments
   (`///`, `//!`, `/** */`) count too, so long doc blocks are blocked as well.
 
@@ -101,13 +101,20 @@ confidence:
 
 | Tier | Matches | Verdict |
 | --- | --- | --- |
-| 1 | keyword-anchored: `plan 0071`, `task #12`, `phase 3`, ISO dates, `added in` / `fixed by` | **deny** — exit 2, edit blocked, reason fed back to Claude |
-| 2 | bare parenthesised 4-digit IDs, changelog voice (`cleared/renamed/bumped it`), spec-version dates | **ask** — `permissionDecision: "ask"` JSON on stdout, you decide |
+| 1 | keyword-anchored: `plan 0071`, ISO dates, `added in` / `fixed by` / `review fix` / `see plan` | **deny** — exit 2, edit blocked, reason fed back to Claude |
+| 2 | `phase 3` / `wave 2` / `task #12`, bare parenthesised 4-digit IDs, changelog voice (`cleared/renamed/bumped it`), spec-version dates | **ask** — `permissionDecision: "ask"` JSON on stdout, you decide |
 
 Tier 2 is a smoke detector, not a lock: a false positive costs one keypress
-instead of an argument with the agent. Tier 1 skips dates inside URLs
+instead of an argument with the agent. `phase`/`wave`/`task` numbers moved down
+from tier 1 to tier 2 — a `phase 3` in prose is common enough that a hard block
+was more often wrong than right. Tier 1 skips dates inside URLs
 (`…/specification/2025-06-18/`), which are describing the code, not stamping it.
 A tier-1 hit always wins over a tier-2 one on the same edit.
+
+Both tiers only look at the comment portion of a line — the text from the first
+comment marker (`//`, `#`, `/*`, …) onward — and string literals are stripped
+before that marker search. So a date embedded in a code string, or a quoted date
+example inside a comment, never matches either tier.
 
 Measured over ~95k comment lines of real source, tier 2 fires on 0.06% of comment
 lines; on a codebase with no metadata convention at all (`llama.cpp`), tier 1
@@ -141,13 +148,19 @@ its own calibration signal: if you're approving nearly all of them, tighten
 `BLOCK_EXTENT` or drop the check; if you're rejecting nearly all of them,
 promote it to a deny.
 
-For check (b) the hook simulates the edit against the on-disk file (splicing
-`new_string` over `old_string`, including `replace_all` and sequential
-`MultiEdit` edits), so a short comment added next to existing comment lines is
-counted as one run. Only runs the edit actually touches are flagged —
-pre-existing long comments elsewhere in the file never block an unrelated edit.
-If the file can't be read (e.g. a new file), it falls back to checking the added
-text in isolation.
+For check (b) the hook simulates the edit against the on-disk file. `Edit`/`MultiEdit`
+splice `new_string` over `old_string` (including `replace_all` and sequential
+edits); a `Write` is instead diffed against the on-disk file with `difflib`, so
+only lines the write actually adds count — a pre-existing comment run the
+rewrite didn't touch no longer blocks it. Either way, a short comment added next
+to existing comment lines is counted as one run, and only runs the edit
+actually touches are flagged — pre-existing long comments elsewhere in the file
+never block an unrelated edit. If the file can't be read (e.g. a new file), it
+falls back to checking the added text in isolation.
+
+A first line starting with `#!` (a shebang) is never counted toward a comment
+run in hash-comment languages, so a script's shebang line doesn't eat into the
+4-line budget.
 
 It's comment-syntax aware per file extension (`.rs .js .ts .jsx .tsx .go .php .py
 .css .html`). The intent: keep history in git and planning docs, not in code
@@ -155,3 +168,7 @@ comments, and discourage over-commenting. Tune `MAX_COMMENT_LINES`, `BLOCK_EXTEN
 and the `meta`
 (tier 1) / `suspect` (tier 2) regexes at the top of the script to taste — move a
 pattern between them to change whether it blocks or asks.
+
+Evidence lines printed in a block or ask message are capped at 5 per finding,
+with a `… N more line(s)` tail summarizing the rest, so a long comment run
+doesn't flood the reason text.
