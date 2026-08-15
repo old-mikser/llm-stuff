@@ -83,8 +83,8 @@ a `PreToolUse` hook on every `Edit`/`Write`/`MultiEdit`. It reads the hook JSON 
 stdin and **blocks the edit before it lands** (exit code 2, with the reason sent
 back to Claude) when the change:
 
-- **(a)** puts metadata inside a comment — dates (`YYYY-MM-DD`), a `plan` number,
-  or phrases like `added in` / `fixed by` / `review fix` / `see plan`; or
+- **(a)** puts metadata inside a comment — dates (`YYYY-MM-DD`), plan/phase/wave
+  numbers, task IDs, or phrases like `added in` / `fixed by` / `review fix`; or
 - **(b)** would leave a run of **4+ consecutive** comment lines — doc comments
   (`///`, `//!`, `/** */`) count too, so long doc blocks are blocked as well.
 
@@ -101,13 +101,11 @@ confidence:
 
 | Tier | Matches | Verdict |
 | --- | --- | --- |
-| 1 | keyword-anchored: `plan 0071`, ISO dates, `added in` / `fixed by` / `review fix` / `see plan` | **deny** — exit 2, edit blocked, reason fed back to Claude |
-| 2 | `phase 3` / `wave 2` / `task #12`, bare parenthesised 4-digit IDs, changelog voice (`cleared/renamed/bumped it`), spec-version dates | **ask** — `permissionDecision: "ask"` JSON on stdout, you decide |
+| 1 | keyword-anchored: `plan 0071`, `phase 3` / `wave 2`, ISO dates, `added in` / `fixed by` / `review fix` / `see plan`, `task #12` | **deny** — exit 2, edit blocked, reason fed back to Claude |
+| 2 | bare parenthesised 4-digit IDs, changelog voice (`cleared/renamed/bumped it`), spec-version dates | **ask** — `permissionDecision: "ask"` JSON on stdout, you decide |
 
 Tier 2 is a smoke detector, not a lock: a false positive costs one keypress
-instead of an argument with the agent. `phase`/`wave`/`task` numbers moved down
-from tier 1 to tier 2 — a `phase 3` in prose is common enough that a hard block
-was more often wrong than right. Tier 1 skips dates inside URLs
+instead of an argument with the agent. Tier 1 skips dates inside URLs
 (`…/specification/2025-06-18/`), which are describing the code, not stamping it.
 A tier-1 hit always wins over a tier-2 one on the same edit.
 

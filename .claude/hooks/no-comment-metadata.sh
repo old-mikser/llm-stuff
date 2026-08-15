@@ -128,18 +128,19 @@ marker = re.compile(MARKERS[style])
 # Tier 1: keyword-anchored, unambiguous => hard block.
 meta = re.compile(
     r"plan\s*#?\s*[0-9]{3,4}"
+    r"|phase\s+[0-9]+"
+    r"|wave\s+[0-9]+"
     r"|added in\b"
     r"|fixed (by|in)\b"
     r"|review fix"
     r"|see plan"
+    r"|task\s*#?\s*[0-9]+"
     r"|[0-9]{4}-[0-9]{2}-[0-9]{2}",
     re.IGNORECASE,
 )
 # Tier 2: could equally be a bitmask, an opcode or plain prose => ask, never block.
 suspect = re.compile(
     r"\(\s*#?\s*[0-9]{4}\s*\)"  # bare parenthesised ID: "cleared it (0010)"
-    r"|\b(?:phase|wave)\s+[0-9]+\b"
-    r"|\btask\s*#?\s*[0-9]+\b"
     r"|\b(?:clear|remov|renam|bump|drop|mov|switch|replac|updat|delet|revert|split)ed"
     r"\s+(?:it|this|that|these|those|them)\b",
     re.IGNORECASE,
@@ -336,7 +337,7 @@ if not meta_hits and not long_runs:
 
 if meta_hits:
     print(f"BLOCKED: comment metadata in {path} (AGENTS.md § Code comments policy).", file=sys.stderr)
-    print("No dates, plan numbers, or 'added in / fixed by / review fix / see plan' in code comments.", file=sys.stderr)
+    print("No dates, plan/phase/wave numbers, task IDs, or 'added in / fixed by / review fix' in code comments.", file=sys.stderr)
     for ln in clipped(meta_hits):
         print("  " + ln, file=sys.stderr)
 
