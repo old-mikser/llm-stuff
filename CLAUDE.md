@@ -1,8 +1,8 @@
 # Working in this repo
 
 This repo is the **source of truth** for the Claude Code hooks in `.claude/hooks/`.
-Edit them here. Committed state is deployed state — never hand-edit `~/.claude/`
-to make a change, and never copy files between the two by hand.
+Edit them here — never hand-edit `~/.claude/` to make a change, and never copy
+files between the two by hand.
 
 ## Every time you change a hook
 
@@ -11,9 +11,6 @@ to make a change, and never copy files between the two by hand.
    `.claude/settings.example.json` to match.
 3. Update the matching `README.md` section.
 4. Commit and push to `main` directly — no PR.
-
-Because the committed state is what runs, a change is not finished until it is
-committed: an uncommitted edit is not live, no matter how well it tests.
 
 ## Testing a hook
 
