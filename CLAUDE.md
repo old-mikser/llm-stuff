@@ -1,26 +1,19 @@
 # Working in this repo
 
-This repo is a **mirror** of the live Claude Code hooks in `~/.claude/hooks/`.
-The live copy is the one that actually runs; the repo copy is the published one.
+This repo is the **source of truth** for the Claude Code hooks in `.claude/hooks/`.
+Edit them here. Committed state is deployed state — never hand-edit `~/.claude/`
+to make a change, and never copy files between the two by hand.
 
 ## Every time you change a hook
 
-Edit the live file in `~/.claude/hooks/` first, test it there, then:
-
-1. `cp ~/.claude/hooks/<file> .claude/hooks/<file>` — the two must be byte-identical.
-2. If the `hooks` block in `~/.claude/settings.json` changed, mirror it into
-   `.claude/settings.example.json`.
+1. Edit the file under `.claude/hooks/` and test it (see below).
+2. If the `hooks` block your settings need has changed, update
+   `.claude/settings.example.json` to match.
 3. Update the matching `README.md` section.
 4. Commit and push to `main` directly — no PR.
 
-**Before any push, verify the sync in both directions:**
-
-```bash
-diff -r ~/.claude/hooks .claude/hooks --exclude='*.log'
-```
-
-A push with the repo and `~/.claude/` out of step is a broken push — the README
-would then describe a hook that isn't what's running.
+Because the committed state is what runs, a change is not finished until it is
+committed: an uncommitted edit is not live, no matter how well it tests.
 
 ## Testing a hook
 
@@ -28,8 +21,11 @@ Hooks read their JSON payload on stdin, so they can be driven directly:
 
 ```bash
 echo '{"tool_input":{"file_path":"/tmp/t.rs","old_string":"a","new_string":"// note\na"}}' \
-  | python3 ~/.claude/hooks/no-comment-metadata.sh; echo "exit=$?"
+  | python3 .claude/hooks/no-comment-metadata.sh; echo "exit=$?"
 ```
 
 Exit 2 means deny (stderr goes back to Claude); exit 0 with
 `permissionDecision: "ask"` JSON on stdout means the user is prompted.
+
+Keep a hook's test cases in the repo rather than only in a chat transcript —
+they are the only thing that catches a regression in the next change.
