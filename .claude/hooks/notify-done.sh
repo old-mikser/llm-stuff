@@ -19,13 +19,40 @@ export PULSE_SERVER="${PULSE_SERVER:-unix:/mnt/wslg/PulseServer}"
 _env_mode="${NOTIFY_MODE:-}"
 _env_volume="${NOTIFY_PENDING_VOLUME:-}"
 _env_stale="${NOTIFY_STALE_MINUTES:-}"
+_env_skip_sdk="${NOTIFY_SKIP_SDK:-}"
 # shellcheck source=/dev/null
 [ -f "$HERE/notify-done.conf" ] && . "$HERE/notify-done.conf"
 NOTIFY_MODE="${_env_mode:-${NOTIFY_MODE:-quiet}}"
 NOTIFY_PENDING_VOLUME="${_env_volume:-${NOTIFY_PENDING_VOLUME:-22000}}"
 export NOTIFY_STALE_MINUTES="${_env_stale:-${NOTIFY_STALE_MINUTES:-60}}"
+NOTIFY_SKIP_SDK="${_env_skip_sdk:-${NOTIFY_SKIP_SDK:-on}}"
 
 payload="$(cat)"
+
+# Headless SDK runs (`claude -p`, eval and test harnesses) end a turn each, so a
+# batch of them plays one chime per run for work the operator never started. The
+# Stop payload has no entrypoint field, so read it off the transcript's first
+# entry. Anything unreadable falls through to chiming.
+if [ "$NOTIFY_SKIP_SDK" != "off" ] && printf '%s' "$payload" | python3 -c '
+import json, sys
+try:
+    path = (json.load(sys.stdin) or {}).get("transcript_path") or ""
+    with open(path) as f:
+        for _ in range(20):
+            line = f.readline()
+            if not line:
+                break
+            entry = json.loads(line)
+            kind = entry.get("entrypoint") or entry.get("promptSource") or ""
+            if kind:
+                sys.exit(0 if kind.startswith("sdk") else 1)
+except Exception:
+    pass
+sys.exit(1)
+' 2>>"$LOG"; then
+    echo "[$(date '+%F %T')] hook skipped kind=sdk" >>"$LOG"
+    exit 0
+fi
 pending=0
 if [ "$NOTIFY_MODE" != "always" ]; then
     pending="$(printf '%s' "$payload" | python3 "$HERE/pending-agents.py" 2>>"$LOG")"

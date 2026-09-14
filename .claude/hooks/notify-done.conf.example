@@ -15,6 +15,10 @@ NOTIFY_PENDING_VOLUME=22000
 # Bounds the silence if an agent ever dies without one.
 NOTIFY_STALE_MINUTES=60
 
+# on (default) — stay silent for headless SDK runs (`claude -p`, eval and test
+# harnesses), which otherwise chime once per run; off — chime for those too.
+NOTIFY_SKIP_SDK=on
+
 # --- notify-ask.sh: the chime for when Claude is waiting on you --------------
 
 # on (default) — chime when Claude asks; off — never
