@@ -51,6 +51,13 @@ print(json.dumps({"tool_input": {
 PY
 }
 
+bash() { # command -> verdict
+    python3 - "$1" <<'PY' | { read -r payload; verdict "$payload"; }
+import json, sys
+print(json.dumps({"tool_name": "Bash", "tool_input": {"command": sys.argv[1]}}))
+PY
+}
+
 write() { # content [path] -> verdict
     python3 - "$1" "${2:-$WORK/t.rs}" <<'PY' | { read -r payload; verdict "$payload"; }
 import json, sys
@@ -60,54 +67,125 @@ PY
 
 reset_file
 
-# --- check (c): comment budget on a one-liner -------------------------------
-# 3 lines on a plain short statement is the whole rule. 1-2 lines stay allowed,
-# and the exemptions below are what keep it from firing on ordinary code.
+# --- the comment budget --------------------------------------------------
+# Two lines is the whole budget: enough for a why and its consequence, not
+# enough for a paragraph. It applies everywhere, so the old check (c) target
+# exemptions (declaration, section header, doc comment) no longer buy a third
+# line -- they are covered by the same cap as anything else.
 
 check "1 comment line on a one-liner" "allow" "$(edit '    // recompute the offset
     let a = 1;')"
 check "2 comment lines on a one-liner" "allow" "$(edit '    // recompute the offset
     // because the header moved
     let a = 1;')"
+check "2 comment lines on a declaration" "allow" "$(edit '    // recompute the offset
+    // because the header moved
+    fn helper() {}')"
 check "3 comment lines on a one-liner" "block" "$(edit '    // recompute the offset
     // because the header moved
     // and the caller assumes it
     let a = 1;')"
-check "3 lines on a declaration" "allow" "$(edit '    // recompute the offset
+check "3 lines on a declaration buys no exemption" "block" "$(edit '    // recompute the offset
     // because the header moved
     // and the caller assumes it
     fn helper() {}')"
-check "3 lines on a pub async declaration" "allow" "$(edit '    // recompute the offset
-    // because the header moved
-    // and the caller assumes it
-    pub async fn helper() {}')"
-check "3 lines with a blank gap is a section header" "allow" "$(edit '    // recompute the offset
+check "3 lines with a blank gap buys no exemption" "block" "$(edit '    // recompute the offset
     // because the header moved
     // and the caller assumes it
 
     let a = 1;')"
-check "3 doc lines are exempt" "allow" "$(edit '    /// recompute the offset
+check "3 doc lines buy no exemption" "block" "$(edit '    /// recompute the offset
     /// because the header moved
     /// and the caller assumes it
     let a = 1;')"
-check "3 lines through an attribute onto a declaration" "allow" "$(edit '    // recompute the offset
-    // because the header moved
-    // and the caller assumes it
-    #[inline]
-    fn helper() {}')"
-check "3 lines on a statement with a real body" "allow" "$(edit '    // recompute the offset
-    // because the header moved
-    // and the caller assumes it
-    if a > 0 {
-        println!("hi");
-        return;
-    }')"
-check "3 lines commenting nothing at end of file" "allow" "$(edit '    let a = 1;
+check "3 lines commenting nothing at end of file" "block" "$(edit '    let a = 1;
 }
 // recompute the offset
 // because the header moved
 // and the caller assumes it' '    let a = 1;
 }')"
+
+# --- //! module headers -----------------------------------------------------
+# The one comment an agent reads first, and it can only appear at the top of a
+# file, so it cannot be used as an escape hatch the way /// could.
+
+check "a //! module header is exempt" "allow" "$(write '//! The session table.
+//! Owns every live RLPx session, so a restart must not
+//! drop it, and session ids need an incarnation.
+//! Dialing is rationed elsewhere.
+
+pub struct S;')"
+check "a //! header under an inner attribute is exempt" "allow" "$(write '#![allow(dead_code)]
+
+//! The session table.
+//! Owns every live session, so a restart must not
+//! drop it, and ids need an incarnation.
+//! Dialing is rationed elsewhere.
+
+pub struct S;')"
+check "//! below the header region is not exempt" "block" "$(write 'pub struct S;
+
+fn f() {}
+//! one
+//! two
+//! three
+pub struct T;')"
+check "/// is never exempt" "block" "$(write 'pub struct S;
+
+fn f() {}
+/// one
+/// two
+/// three
+pub struct T;')"
+
+# --- pointers vs stamps -----------------------------------------------------
+# ADR-NNNN and (#NNN) send a reader to a durable document; plan/step/date
+# numbers only record when the line was written.
+
+check "an ADR pointer is not a stamp" "allow" "$(edit '    // The transport owns every live session (ADR-0023).
+    let a = 1;')"
+check "an issue pointer is not a stamp" "allow" "$(edit '    // Ranked by the order logic (#144).
+    let a = 1;')"
+check "a step number is a stamp" "block" "$(edit '    // Rewritten in Step 4.
+    let a = 1;')"
+check "a plan number is still a stamp next to a pointer" "block" "$(edit '    // Ranked them (#144), see plan 143.
+    let a = 1;')"
+
+# --- Bash writes ------------------------------------------------------------
+# A heredoc redirected into a source file is a write, and gets the same checks.
+
+check "a heredoc into a .rs file is checked" "block" "$(bash "cat > $WORK/t.rs <<'EOF'
+// one
+// two
+// three
+let a = 1;
+EOF")"
+check "a heredoc with a stamp is checked" "block" "$(bash "cat > $WORK/t.rs <<'EOF'
+// Added in plan 143.
+let a = 1;
+EOF")"
+check "a heredoc inside the budget is allowed" "allow" "$(bash "cat > $WORK/t.rs <<'EOF'
+// recompute the offset
+// because the header moved
+let a = 1;
+EOF")"
+check "tee into a .rs file is checked" "block" "$(bash "tee $WORK/t.rs <<'EOF'
+// one
+// two
+// three
+let a = 1;
+EOF")"
+check "a heredoc into a non-source file is ignored" "allow" "$(bash "cat > $WORK/notes.txt <<'EOF'
+// one
+// two
+// three
+EOF")"
+check "a bash command with no write is ignored" "allow" "$(bash 'grep -rn foo crates/ | head')"
+check "a python heredoc on stdin has no target" "allow" "$(bash 'python3 - <<EOF
+# one
+# two
+# three
+EOF')"
 
 # --- check (b): runs over the budget ----------------------------------------
 

@@ -1,8 +1,13 @@
 #!/usr/bin/env python3
-# PreToolUse hook: blocks Edit/Write/MultiEdit to source files when the change
-#   (a) puts metadata inside a comment,
-#   (b) would leave a run of 4+ consecutive comment lines, or
-#   (c) puts a full 3-line comment on a one-line statement. Doc comments count too.
+# PreToolUse hook: blocks Edit/Write/MultiEdit/Bash writes to source files when
+#   (a) the change puts metadata inside a comment,
+#   (b) it would leave a run of 3+ consecutive comment lines, or
+#   (c) it puts a full comment block on a one-line statement (dormant while (b) is tighter).
+# /// counts too; only a //! module header at the top of the file is exempt, since that is
+# the one comment an agent reads first and cannot spam elsewhere. ADR-NNNN and (#NNN) are
+# pointers to a durable document, not change stamps, so they survive the metadata check.
+# A Bash command is scanned for heredocs redirected into a source file, so `cat > f <<EOF`
+# cannot walk past the checks; each body is re-checked as if it were a Write.
 # One softer signal only asks: ambiguous metadata (bare IDs, changelog voice) can't
 # be told from real code talk by pattern alone.
 # The edit is simulated against the on-disk file (a Write is diffed against it, so
@@ -10,10 +15,11 @@
 # comment lines are counted together; only runs the change touches are flagged,
 # never pre-existing ones elsewhere. Evidence printed per finding is capped.
 # Language-aware comment syntax. Reads hook JSON on stdin; exit 2 + stderr => fed back to Claude.
-import bisect, difflib, json, os, re, sys
+import bisect, difflib, json, os, re, subprocess, sys
 
-MAX_COMMENT_LINES = 3  # 4+ in a row is blocked
+MAX_COMMENT_LINES = 2  # 3+ in a row is blocked
 BLOCK_EXTENT = 3  # code shorter than this is a one-liner: 1 comment line is enough
+ONELINER_RUN = 3  # run length check (c) fires on; dormant while the global cap is lower
 MAX_SHOWN = 5  # lines of evidence printed per finding; the rest is elided
 
 # style: line-comment prefixes, block (open, close)
@@ -81,6 +87,57 @@ try:
 except Exception:
     sys.exit(0)
 
+HEREDOC = re.compile(r"<<-?\s*(['\"]?)([A-Za-z_][A-Za-z0-9_]*)\1")
+REDIR = re.compile(r">>?\s*([^\s|;&<>]+)|\btee\s+(?:-a\s+)?([^\s|;&<>]+)")
+
+
+def bash_writes(cmd):
+    """(path, body) for every heredoc in cmd that lands in a file we check."""
+    out, lines = [], cmd.split("\n")
+    i = 0
+    while i < len(lines):
+        m = HEREDOC.search(lines[i])
+        if not m:
+            i += 1
+            continue
+        delim = m.group(2)
+        r = REDIR.search(lines[i])
+        target = (r.group(1) or r.group(2)) if r else ""
+        body, j = [], i + 1
+        while j < len(lines) and lines[j].strip() != delim:
+            body.append(lines[j])
+            j += 1
+        target = target.strip("'\"")
+        if target and os.path.splitext(target)[1].lower() in EXT_STYLE:
+            out.append((target, "\n".join(body)))
+        i = j + 1
+    return out
+
+
+def run_self(p):
+    return subprocess.run(
+        [sys.executable, os.path.abspath(__file__)],
+        input=json.dumps(p), capture_output=True, text=True,
+    )
+
+
+if (payload.get("tool_name") or "") == "Bash":
+    cmd = (payload.get("tool_input") or {}).get("command") or ""
+    blocked, asks = False, []
+    for target, body in bash_writes(cmd):
+        r = run_self({"tool_name": "Write",
+                      "tool_input": {"file_path": target, "content": body}})
+        if r.returncode == 2:
+            blocked = True
+            sys.stderr.write(r.stdout + r.stderr)
+        elif r.stdout.strip():
+            asks.append(r.stdout)
+    if blocked:
+        sys.exit(2)
+    if asks:
+        sys.stdout.write(asks[0])
+    sys.exit(0)
+
 ti = payload.get("tool_input") or {}
 path = ti.get("file_path") or ""
 ext = os.path.splitext(path)[1].lower()
@@ -135,6 +192,7 @@ meta = re.compile(
     r"|review fix"
     r"|see plan"
     r"|task\s*#?\s*[0-9]+"
+    r"|step\s+[0-9]+"
     r"|[0-9]{4}-[0-9]{2}-[0-9]{2}",
     re.IGNORECASE,
 )
@@ -146,12 +204,14 @@ suspect = re.compile(
     re.IGNORECASE,
 )
 # A date in a URL or a spec version is describing the code, not stamping it.
+# ADR-NNNN and (#NNN) point at a durable document, so they survive scrubbing.
 url = re.compile(r"\S+://\S+|\b\w+\.(?:io|com|org|net|dev)/\S*")
+pointer = re.compile(r"\bADR-[0-9]{4}\b|\(\s*#[0-9]{3}\s*\)", re.I)
 spec_date = re.compile(r"\b(?:spec|version|rev|rfc|standard)\w*\s+[0-9]{4}-[0-9]{2}-[0-9]{2}", re.I)
 
 
 def scrub(ln):
-    return spec_date.sub("", url.sub("", ln))
+    return pointer.sub("", spec_date.sub("", url.sub("", ln)))
 
 
 STR = re.compile(r"'(?:\\.|[^'\\])*'|\"(?:\\.|[^\"\\])*\"")
@@ -235,7 +295,21 @@ for i, ln in enumerate(lines):
         flush(i)
 flush(len(lines))
 
-long_runs = [(s + 1, lines[s:e]) for s, e in touched_runs if e - s > MAX_COMMENT_LINES]
+MOD_ATTR = re.compile(r"^#!\[")
+
+
+def module_header(s, e):
+    """A //! run with nothing but blanks and inner attributes above it. Anchoring
+    it to the top of the file is what stops //! becoming an escape hatch."""
+    if not all(l.lstrip().startswith("//!") for l in lines[s:e]):
+        return False
+    return all(not l.strip() or MOD_ATTR.match(l.lstrip()) for l in lines[:s])
+
+
+long_runs = [
+    (s + 1, lines[s:e]) for s, e in touched_runs
+    if e - s > MAX_COMMENT_LINES and not module_header(s, e)
+]
 
 # --- Check (c): 3-line comment on a one-liner ---
 # Every ambiguous case gets the larger budget: a declaration, a blank-line gap
@@ -303,7 +377,7 @@ def extent(i):
 
 oversized = []
 for s, e in touched_runs:
-    if e - s != MAX_COMMENT_LINES:
+    if e - s != ONELINER_RUN or ONELINER_RUN > MAX_COMMENT_LINES:
         continue
     if lines[s].lstrip().startswith(DOC):
         continue
@@ -333,14 +407,14 @@ if meta_hits:
 
 if long_runs:
     print(f"BLOCKED: this edit would leave a comment run over {MAX_COMMENT_LINES} lines in {path} (AGENTS.md § Code comments policy: write fewer comments).", file=sys.stderr)
-    print("Counting adjacent existing comment lines too. Cut it down. Doc comments are not exempt.", file=sys.stderr)
+    print("Counting adjacent existing comment lines too. Cut it down. /// is not exempt; only a //! module header at the top of the file is.", file=sys.stderr)
     for start, blk in long_runs:
         print(f"  lines {start}-{start + len(blk) - 1} ({len(blk)} comment lines):", file=sys.stderr)
         for ln in clipped(blk):
             print("    " + ln, file=sys.stderr)
 
 if oversized:
-    print(f"BLOCKED: {MAX_COMMENT_LINES} comment lines on a one-liner in {path} (AGENTS.md § Code comments policy: write fewer comments).", file=sys.stderr)
+    print(f"BLOCKED: {ONELINER_RUN} comment lines on a one-liner in {path} (AGENTS.md § Code comments policy: write fewer comments).", file=sys.stderr)
     print("Cut it to one or two lines. Declarations and section headers are exempt; a plain short statement is not.", file=sys.stderr)
     for start, blk, tline, target in oversized:
         print(f"  lines {start}-{start + len(blk) - 1}:", file=sys.stderr)

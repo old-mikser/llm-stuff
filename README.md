@@ -8,7 +8,7 @@ Everything lives under [`.claude/hooks/`](.claude/hooks/). Three hooks are inclu
 |------|-------|--------------|
 | [`notify-done.sh`](.claude/hooks/notify-done.sh) | `Stop` | Plays a soft completion chime when Claude finishes a turn — by default staying quiet while background agents are still running. |
 | [`notify-ask.sh`](.claude/hooks/notify-ask.sh) | `Notification`, `PreToolUse` (AskUserQuestion) | Plays a two-blip attention chime when Claude is waiting on *you* — a permission prompt or an a) b) c) question. |
-| [`no-comment-metadata.sh`](.claude/hooks/no-comment-metadata.sh) | `PreToolUse` (Edit/Write/MultiEdit) | Blocks edits that put metadata in comments, add long comment blocks, or over-comment a one-liner; asks on ambiguous metadata. |
+| [`no-comment-metadata.sh`](.claude/hooks/no-comment-metadata.sh) | `PreToolUse` (Edit/Write/MultiEdit/Bash) | Blocks edits that put metadata in comments or add long comment blocks, including heredocs written through Bash; asks on ambiguous metadata. |
 
 ## Install
 
@@ -201,16 +201,27 @@ you prefer" is worse than one whose silence you can rely on.
 ## `no-comment-metadata.sh` — comment policy enforcement
 
 A Python hook (despite the `.sh` name — it's invoked as `python3 …`) that runs as
-a `PreToolUse` hook on every `Edit`/`Write`/`MultiEdit`. It reads the hook JSON on
-stdin and **blocks the edit before it lands** (exit code 2, with the reason sent
-back to Claude) when the change:
+a `PreToolUse` hook on every `Edit`/`Write`/`MultiEdit`/`Bash`. It reads the hook
+JSON on stdin and **blocks the edit before it lands** (exit code 2, with the
+reason sent back to Claude) when the change:
 
 - **(a)** puts metadata inside a comment — dates (`YYYY-MM-DD`), plan/phase/wave
-  numbers, task IDs, or phrases like `added in` / `fixed by` / `review fix`; or
-- **(b)** would leave a run of **4+ consecutive** comment lines — doc comments
-  (`///`, `//!`, `/** */`) count too, so long doc blocks are blocked as well; or
-- **(c)** puts a **3-line** comment run on a single-line statement. One and two
-  lines are always fine. See [Sizing a comment to its code](#sizing-a-comment-to-its-code).
+  numbers, task or step IDs, or phrases like `added in` / `fixed by` / `review fix`; or
+- **(b)** would leave a run of **3+ consecutive** comment lines — doc comments
+  (`///`, `/** */`) count too, so long doc blocks are blocked as well. The one
+  exemption is a `//!` module header at the top of the file. See
+  [The two-line budget](#the-two-line-budget).
+- **(c)** puts a full comment run on a single-line statement. Dormant while (b)
+  is the tighter of the two; it applies again if you raise `MAX_COMMENT_LINES`.
+
+### Why Bash is covered
+
+A hook matched only on `Edit|Write|MultiEdit` is bypassed entirely by `cat > f
+<<'EOF'`, `tee`, or a heredoc inside a script — and an agent told to prefer shell
+tooling will reach for exactly that. The hook scans a `Bash` command for
+heredocs redirected into a file with a known source extension and re-checks each
+body as if it were a `Write`. A command that writes nothing, or writes somewhere
+we don't check, costs one process spawn (~24 ms) and exits silently.
 
 ### Two confidence tiers
 
@@ -222,12 +233,18 @@ confidence:
 
 | Tier | Matches | Verdict |
 | --- | --- | --- |
-| 1 | keyword-anchored: `plan 0071`, `phase 3` / `wave 2`, ISO dates, `added in` / `fixed by` / `review fix` / `see plan`, `task #12` | **deny** — exit 2, edit blocked, reason fed back to Claude |
+| 1 | keyword-anchored: `plan 0071`, `phase 3` / `wave 2`, ISO dates, `added in` / `fixed by` / `review fix` / `see plan`, `task #12`, `step 4` | **deny** — exit 2, edit blocked, reason fed back to Claude |
 | 2 | bare parenthesised 4-digit IDs, changelog voice (`cleared/renamed/bumped it`), spec-version dates | **ask** — `permissionDecision: "ask"` JSON on stdout, you decide |
 
 Tier 2 is a smoke detector, not a lock: a false positive costs one keypress
 instead of an argument with the agent. Tier 1 skips dates inside URLs
 (`…/specification/2025-06-18/`), which are describing the code, not stamping it.
+
+It also skips `ADR-0023` and `(#144)`. A reference to a numbered decision record
+or issue points at a document that outlives the change and tells a later reader
+where the constraint came from; `plan 143 Step 4` only records when the line was
+written, and resolves to nothing once the plan is archived. Pointer stays, stamp
+goes.
 A tier-1 hit always wins over a tier-2 one on the same edit.
 
 Both tiers only look at the comment portion of a line — the text from the first
@@ -239,19 +256,30 @@ Measured over ~95k comment lines of real source, tier 2 fires on 0.06% of commen
 lines; on a codebase with no metadata convention at all (`llama.cpp`), tier 1
 fires 4 times in 11.3k comment lines and tier 2 five times.
 
-### Sizing a comment to its code
+### The two-line budget
 
-Three lines of comment above a function is proportionate; three lines above `let
-n = min(n, 255);` usually isn't. Check (c) tries to tell those apart without a
-parser: it finds the run's **target** — the next code line, skipping attributes
-and decorators like `#[derive(…)]` or `@cache` — and measures that statement's
-**extent**, following bracket depth and then indentation. Under 3 lines, the
-target is a one-liner, and a full 3-line comment run on it is **blocked**.
+Two lines is the budget: enough for a why and the consequence that follows from
+it, not enough for a paragraph. A one-liner that genuinely needs explaining — a
+gnarly regex, a magic constant, a workaround for someone else's bug — gets its
+two lines and passes silently. The third line is what marks prose that outgrew
+its code, and it is blocked wherever it appears: above a `fn`, behind a blank
+line, or as `///`.
 
-The budget is two lines, not zero. A one-liner that genuinely needs explaining —
-a gnarly regex, a magic constant, a workaround for someone else's bug — gets its
-two lines and passes silently; the third is what marks prose that outgrew its
-code. Every ambiguous case gets the larger budget and is passed silently too:
+That uniformity is deliberate. An earlier version gave declarations and doc
+comments a larger budget, which just moved the essays into `///` — if one
+comment marker is cheaper than another, that is the one agents write. The single
+exemption is a `//!` module header, and only with nothing above it but blank
+lines and inner attributes (`#![allow(…)]`). It is the first thing an agent
+reads when it opens a file and it saves reading the whole file to orient, so
+it earns its tokens; anchoring it to the top of the file is what stops `//!`
+becoming the next escape hatch.
+
+Check (c) sized a comment run against its target statement — finding the next
+code line, skipping attributes, and measuring the statement's extent by bracket
+depth and indentation. With the budget at two lines, check (b) blocks a
+three-line run before (c) can weigh in, so (c) sits dormant behind
+`ONELINER_RUN`. Raise `MAX_COMMENT_LINES` above 2 and it starts firing again,
+with these exemptions:
 
 | Situation | Why it's exempt |
 | --- | --- |
@@ -260,9 +288,9 @@ code. Every ambiguous case gets the larger budget and is passed silently too:
 | No target — run ends the file or the block | Nothing to measure |
 | Run opens with `///`, `//!`, `/**` | Doc comment, attached to a declaration by definition |
 
-Tune it with `BLOCK_EXTENT` (how many lines of code count as a one-liner) and
-`MAX_COMMENT_LINES`, which sets both the 4+ run limit in (b) and the exact run
-length (c) rejects.
+Tune it with `BLOCK_EXTENT` (how many lines of code count as a one-liner),
+`ONELINER_RUN` (the run length (c) rejects) and `MAX_COMMENT_LINES` (the run
+limit in (b)).
 
 For checks (b) and (c) the hook simulates the edit against the on-disk file. `Edit`/`MultiEdit`
 splice `new_string` over `old_string` (including `replace_all` and sequential
@@ -276,7 +304,7 @@ falls back to checking the added text in isolation.
 
 A first line starting with `#!` (a shebang) is never counted toward a comment
 run in hash-comment languages, so a script's shebang line doesn't eat into the
-4-line budget.
+budget.
 
 It's comment-syntax aware per file extension (`.rs .js .ts .jsx .tsx .go .php .py
 .css .html`). The intent: keep history in git and planning docs, not in code
