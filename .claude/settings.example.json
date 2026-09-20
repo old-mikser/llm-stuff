@@ -36,6 +36,10 @@
           {
             "type": "command",
             "command": "python3 $HOME/.claude/hooks/no-comment-metadata.sh"
+          },
+          {
+            "type": "command",
+            "command": "python3 $HOME/.claude/hooks/deny-no-verify.sh"
           }
         ]
       }

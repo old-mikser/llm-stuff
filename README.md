@@ -2,13 +2,15 @@
 
 Personal Claude Code configuration — hooks I reuse across machines.
 
-Everything lives under [`.claude/hooks/`](.claude/hooks/). Three hooks are included:
+Everything lives under [`.claude/hooks/`](.claude/hooks/). Five hooks are included:
 
 | Hook | Event | What it does |
 |------|-------|--------------|
 | [`notify-done.sh`](.claude/hooks/notify-done.sh) | `Stop` | Plays a soft completion chime when Claude finishes a turn — by default staying quiet while background agents are still running. |
 | [`notify-ask.sh`](.claude/hooks/notify-ask.sh) | `Notification`, `PreToolUse` (AskUserQuestion) | Plays a two-blip attention chime when Claude is waiting on *you* — a permission prompt or an a) b) c) question. |
 | [`no-comment-metadata.sh`](.claude/hooks/no-comment-metadata.sh) | `PreToolUse` (Edit/Write/MultiEdit/Bash) | Blocks edits that put metadata in comments or add long comment blocks, including heredocs written through Bash; asks on ambiguous metadata. |
+| [`no-comment-metadata-precommit.sh`](.claude/hooks/no-comment-metadata-precommit.sh) | git `pre-commit` | Re-runs the same comment checks over what is actually staged, so a change that reached the file by script instead of by tool is still caught. |
+| [`deny-no-verify.sh`](.claude/hooks/deny-no-verify.sh) | `PreToolUse` (Bash) | Denies `git commit --no-verify`, `git push --no-verify` and `core.hooksPath` overrides, so the pre-commit layer cannot be waved through. |
 
 ## Install
 
@@ -19,7 +21,14 @@ cp .claude/hooks/* ~/.claude/hooks/
 
 # 2. Register them in ~/.claude/settings.json
 #    (merge the "hooks" block from .claude/settings.example.json)
+
+# 3. Per repo you want the commit-time layer in:
+ln -sf ~/.claude/hooks/no-comment-metadata-precommit.sh \
+       /path/to/repo/.git/hooks/pre-commit
 ```
+
+Step 3 is per repository — a git hook lives in `.git/hooks/` and is never cloned.
+A symlink keeps every repo on one copy of the script.
 
 See [`.claude/settings.example.json`](.claude/settings.example.json) for the exact `hooks` block to merge into your **global** `~/.claude/settings.json`. Restart Claude Code (or start a new session) after editing `settings.json` so the hook registration is picked up. The scripts themselves are read fresh on every run, so you can tweak them without restarting.
 
@@ -29,6 +38,8 @@ See [`.claude/settings.example.json`](.claude/settings.example.json) for the exa
 tests/notify-done.test.sh   # no audio: a fake paplay on PATH records its args
 tests/notify-ask.test.sh
 tests/no-comment-metadata.test.sh   # builds sample files in a temp dir
+tests/no-comment-metadata-precommit.test.sh   # builds throwaway git repos
+tests/deny-no-verify.test.sh
 ```
 
 ---
@@ -316,3 +327,66 @@ pattern between them to change whether it blocks or asks.
 Evidence lines printed in a block or ask message are capped at 5 per finding,
 with a `… N more line(s)` tail summarizing the rest, so a long comment run
 doesn't flood the reason text.
+
+---
+
+## `no-comment-metadata-precommit.sh` — the commit-time layer
+
+A git `pre-commit` hook. It answers the hole the `PreToolUse` layer cannot close:
+that hook only sees `Edit`/`Write` payloads and heredocs redirected into a source
+file, so a script that opens the file itself walks straight past it — the target
+path is the interpreter's stdin, not a file, so no redirect is there to match:
+
+```bash
+python3 - <<'EOF'
+s = open('src/thing.rs').read()
+s = s.replace(old_doc, new_doc)     # six new /// lines
+open('src/thing.rs', 'w').write(s)
+EOF
+```
+
+An agent told to prefer shell tooling reaches for that shape often. This hook
+reads what is **staged**, so it does not care how the text arrived — tool, script,
+subagent, worktree, or a session running with no hooks at all.
+
+### One copy of the rules
+
+It does not restate a single pattern. For each staged file it writes the `HEAD`
+version to a temp file with the same extension, then feeds
+`no-comment-metadata.sh` a `Write` payload whose `content` is the staged version.
+That is exactly the shape that hook's `Write` path already handles: it diffs the
+two with `difflib`, counts only added lines, and applies the run budget and both
+metadata tiers. The temp path is swapped back to the real path in the message.
+
+Raising `MAX_COMMENT_LINES` or editing a regex therefore changes both layers at
+once, and the two can never drift apart.
+
+### What it costs
+
+It fires late. The commit fails after the build and the tests have already run.
+That is the price of judging the end state instead of the intent — and the end
+state is the only thing a script cannot route around.
+
+Ambiguous (tier 2) metadata has no prompt channel at commit time, so it prints as
+a `WARNING` and does not block. Binary files, files over 2 MB, and extensions the
+comment hook does not police are skipped.
+
+`COMMENT_GUARD_SKIP=1 git commit …` bypasses it. That is for you, at a terminal;
+`deny-no-verify.sh` is what keeps the agent from reaching for the same idea.
+
+---
+
+## `deny-no-verify.sh` — no waving the commit layer through
+
+A `PreToolUse` hook on `Bash`. A commit-time check is only worth having if the
+thing it blocks cannot skip it, and `--no-verify` is one keystroke away from a
+rejected commit.
+
+Denied: `git commit --no-verify` and its `-n` short form (including bundled flags
+like `-nm`), `git push --no-verify`, and a `core.hooksPath` override.
+
+Allowed: anything that only mentions the flag without running it — a `grep` for
+it, a commit message containing the word, `sort -n`. The `-n` match is anchored
+to a `git … commit` on the same command segment.
+
+This binds the agent, not you. Your own shell has no hook in front of it.
