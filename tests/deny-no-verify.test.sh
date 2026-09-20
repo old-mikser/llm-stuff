@@ -39,6 +39,14 @@ check "commit -am"                allow "$(verdict 'git commit -am "fix: thing"'
 check "grep for the flag"         allow "$(verdict 'grep -rn no-verify .')"
 check "unrelated -n"              allow "$(verdict 'sort -n nums.txt')"
 check "commit message says none"  allow "$(verdict 'git commit -m "none of the pools"')"
+check "prose naming the flag"    allow "$(verdict 'echo core.hooksPath >notes.md')"
+check "git config read"           allow "$(verdict 'git config core.hooksPath')"
+
+# A heredoc body is data the command reads, not a command being run.
+doc_case() { printf 'python3 - <<%s\n%s\nEOF\n' "'EOF'" "$1"; }
+check "flag inside a heredoc body"   allow "$(verdict "$(doc_case 'print("git push --no-verify")')")"
+check "heredoc piped into bash"      block "$(verdict "$(printf 'bash <<%s\ngit commit --no-verify -m x\nEOF\n' "'EOF'")")"
+check "flag after a heredoc"         block "$(verdict "$(printf 'cat <<%s >f\nplain text\nEOF\ngit commit --no-verify -m x\n' "'EOF'")")"
 
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]
