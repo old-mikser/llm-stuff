@@ -2,7 +2,7 @@
 
 Personal Claude Code configuration — hooks I reuse across machines.
 
-Everything lives under [`.claude/hooks/`](.claude/hooks/). Five hooks are included:
+Everything lives under [`.claude/hooks/`](.claude/hooks/). Six hooks are included:
 
 | Hook | Event | What it does |
 |------|-------|--------------|
@@ -11,6 +11,7 @@ Everything lives under [`.claude/hooks/`](.claude/hooks/). Five hooks are includ
 | [`no-comment-metadata.sh`](.claude/hooks/no-comment-metadata.sh) | `PreToolUse` (Edit/Write/MultiEdit/Bash) | Blocks edits that put metadata in comments or add long comment blocks, including heredocs written through Bash; asks on ambiguous metadata. |
 | [`no-comment-metadata-precommit.sh`](.claude/hooks/no-comment-metadata-precommit.sh) | git `pre-commit` | Re-runs the same comment checks over what is actually staged, so a change that reached the file by script instead of by tool is still caught. |
 | [`deny-no-verify.sh`](.claude/hooks/deny-no-verify.sh) | `PreToolUse` (Bash) | Denies `git commit --no-verify`, `git push --no-verify` and `core.hooksPath` overrides, so the pre-commit layer cannot be waved through. |
+| [`git-hooks-dispatch.sh`](.claude/hooks/git-hooks-dispatch.sh) | every git hook name | Global entry point for `core.hooksPath`: runs the pre-commit check in every repo, then chains to that repo's own hook of the same name. |
 
 ## Install
 
@@ -22,13 +23,31 @@ cp .claude/hooks/* ~/.claude/hooks/
 # 2. Register them in ~/.claude/settings.json
 #    (merge the "hooks" block from .claude/settings.example.json)
 
-# 3. Per repo you want the commit-time layer in:
+# 3. The commit-time layer, for every repo at once:
+mkdir -p ~/.git-hooks
+for n in applypatch-msg pre-applypatch post-applypatch pre-commit \
+         pre-merge-commit prepare-commit-msg commit-msg post-commit \
+         pre-rebase post-checkout post-merge pre-push post-rewrite; do
+    ln -sf ~/.claude/hooks/git-hooks-dispatch.sh ~/.git-hooks/$n
+done
+git config --global core.hooksPath ~/.git-hooks
+```
+
+Step 3 is global, and the dispatcher is why it is safe. `core.hooksPath`
+**replaces** a repo's `.git/hooks` rather than adding to it, so a bare setting
+would silently retire every hook a repo already has — a secret scanner, a
+formatter, a `post-commit`. The dispatcher runs the global check and then chains
+to the repo's own hook of the same name, which is also why it is installed under
+every hook name and not just `pre-commit`: a name missing from `~/.git-hooks` is
+a name git stops looking for.
+
+A single repo can be covered on its own instead, if you would rather not set a
+global:
+
+```bash
 ln -sf ~/.claude/hooks/no-comment-metadata-precommit.sh \
        /path/to/repo/.git/hooks/pre-commit
 ```
-
-Step 3 is per repository — a git hook lives in `.git/hooks/` and is never cloned.
-A symlink keeps every repo on one copy of the script.
 
 See [`.claude/settings.example.json`](.claude/settings.example.json) for the exact `hooks` block to merge into your **global** `~/.claude/settings.json`. Restart Claude Code (or start a new session) after editing `settings.json` so the hook registration is picked up. The scripts themselves are read fresh on every run, so you can tweak them without restarting.
 
@@ -40,6 +59,7 @@ tests/notify-ask.test.sh
 tests/no-comment-metadata.test.sh   # builds sample files in a temp dir
 tests/no-comment-metadata-precommit.test.sh   # builds throwaway git repos
 tests/deny-no-verify.test.sh
+tests/git-hooks-dispatch.test.sh   # builds throwaway git repos
 ```
 
 ---
@@ -373,6 +393,28 @@ comment hook does not police are skipped.
 
 `COMMENT_GUARD_SKIP=1 git commit …` bypasses it. That is for you, at a terminal;
 `deny-no-verify.sh` is what keeps the agent from reaching for the same idea.
+
+---
+
+## `git-hooks-dispatch.sh` — one pre-commit for every repo
+
+A git hook lives in `.git/hooks/` and is never cloned, so installing the
+commit-time layer per repo means remembering it for each new clone and each new
+worktree. `core.hooksPath` fixes that globally, with one trap: it **replaces** a
+repo's hook directory instead of adding to it. Point it at a directory holding
+only `pre-commit` and every other hook in every repo stops running — including
+ones you did not write and will not notice going quiet.
+
+This dispatcher is installed under every standard hook name in `~/.git-hooks/`.
+For each invocation it:
+
+1. runs `no-comment-metadata-precommit.sh` when it was called as `pre-commit`,
+   and stops there on a non-zero exit;
+2. then execs the repo's own `.git/hooks/<same-name>` with the original
+   arguments, if one exists and is not this script again.
+
+So a repo-local secret scanner still runs and still decides, and a hook name the
+global layer knows nothing about is pure passthrough.
 
 ---
 
