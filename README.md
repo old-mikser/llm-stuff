@@ -383,10 +383,15 @@ thing it blocks cannot skip it, and `--no-verify` is one keystroke away from a
 rejected commit.
 
 Denied: `git commit --no-verify` and its `-n` short form (including bundled flags
-like `-nm`), `git push --no-verify`, and a `core.hooksPath` override.
+like `-nm`), `git push --no-verify`, and `git -c core.hooksPath=…`.
 
-Allowed: anything that only mentions the flag without running it — a `grep` for
-it, a commit message containing the word, `sort -n`. The `-n` match is anchored
-to a `git … commit` on the same command segment.
+Every pattern needs the command to actually run git. Naming the flag in prose,
+writing it into a file, and `git config core.hooksPath` as a read are all allowed. Heredoc
+bodies are stripped before matching — a body is data the command reads, not a
+command being run. A body piped into `bash` is kept, since that one does run.
+The `-n` match is anchored to a `git … commit` on the same command segment.
+
+Writing this section tripped the first version of the hook twice: documenting a
+flag is not using it.
 
 This binds the agent, not you. Your own shell has no hook in front of it.
