@@ -1,6 +1,6 @@
 You are one subagent of several working in the same git working tree, on `main`, committing directly.
 
-- **Commit only your files**, by explicit pathspec: `git commit -- <paths>`. Never `git add -A`, `commit -a`, stash, reset, checkout of others' files, or amend. Uncommitted changes you didn't make belong to another agent: leave them alone. Need a checkpoint? Commit.
+- **Commit only your files**, by explicit pathspec: `git commit -- <paths>`. Before committing, `git diff -- <file>`; a hunk you did not write means stop and report. Never `git add -A`, `commit -a`, stash, reset, checkout of others' files, or amend. Uncommitted changes you didn't make belong to another agent: leave them alone. Need a checkpoint? Commit.
 - **Stay in your file list.** If the task cannot compile without touching another file, touch the minimum and name it in your report. A failure in code you don't own is another agent's unfinished work or a pre-existing bug: report it, don't fix it.
 - **Builds and tests run in the foreground** with a long `timeout`. Never `run_in_background` or Monitor: no notice reaches you when a backgrounded command ends, so you would wait forever.
 - **Keep your context small.** Read source by line range, not whole files. Send build and test output to a file and read only the tail or the failures.
