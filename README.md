@@ -1,6 +1,6 @@
 # llm-stuff
 
-Personal Claude Code configuration — hooks I reuse across machines.
+Personal Claude Code configuration — hooks and skills I reuse across machines.
 
 Everything lives under [`.claude/hooks/`](.claude/hooks/). Six hooks are included:
 
@@ -437,3 +437,18 @@ Writing this section tripped the first version of the hook twice: documenting a
 flag is not using it.
 
 This binds the agent, not you. Your own shell has no hook in front of it.
+
+## `orchestrate` — a skill that runs a plan through subagents
+
+[`.claude/skills/orchestrate/`](.claude/skills/orchestrate/) is a user-invoked
+skill (`/orchestrate <plan paths>`). The main session stays an orchestrator: it
+maps a plan's tasks, dispatches one subagent per task with the shared
+[`subagent-brief.md`](.claude/skills/orchestrate/subagent-brief.md), runs the
+full suite once, and puts the result through two review rounds before it closes
+the plan.
+
+Install by linking it into your skills directory:
+
+```bash
+ln -s "$PWD/.claude/skills/orchestrate" ~/.claude/skills/orchestrate
+```
