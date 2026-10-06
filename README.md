@@ -440,15 +440,15 @@ This binds the agent, not you. Your own shell has no hook in front of it.
 
 ## `orchestrate` — a skill that runs a plan through subagents
 
-[`.claude/skills/orchestrate/`](.claude/skills/orchestrate/) is a user-invoked
+[`skills/orchestrate/`](skills/orchestrate/) is a user-invoked
 skill (`/orchestrate <plan paths>`). The main session stays an orchestrator: it
 maps a plan's tasks, dispatches one subagent per task with the shared
-[`subagent-brief.md`](.claude/skills/orchestrate/subagent-brief.md), runs the
+[`subagent-brief.md`](skills/orchestrate/subagent-brief.md), runs the
 full suite once, and puts the result through up to two review rounds before it closes
 the plan.
 
 Install by linking it into your skills directory:
 
 ```bash
-ln -s "$PWD/.claude/skills/orchestrate" ~/.claude/skills/orchestrate
+ln -s "$PWD/skills/orchestrate" ~/.claude/skills/orchestrate
 ```
