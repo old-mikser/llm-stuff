@@ -8,7 +8,7 @@ this is the only copy that matters.
 1. Edit the file under `.claude/hooks/` and test it (see below).
 2. If the `hooks` block your settings need has changed, update
    `.claude/settings.example.json` to match.
-3. Update the matching `README.md` section.
+3. Update the hook's section in `.claude/hooks/README.md`.
 4. Commit and push to `main` directly — no PR.
 
 ## Testing a hook
