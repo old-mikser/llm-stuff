@@ -8,7 +8,7 @@ const CACHE_TTL_MS = 60 * 60_000
 const COLD = '#87cefa'
 
 const CYCLE_TIP = /\([^)]*to cycle\)/
-const AGENTS_PILL = /^←\s*\d+\s+agents?$/
+const KEY_HINT = /\b(to|for)\b/
 
 // "claude-opus-5-5" -> "Opus 5.5"
 const label = (id: string) => {
@@ -168,13 +168,16 @@ export const register: Register = on => {
     }
   })
 
-  // A rewritten hint is drawn as plain text after `<mode> · `, so its pills stop being clickable.
+  // A rewritten hint is plain text, so while a pill shows (the agents pill opens the background
+  // tasks, monitors among them) the engine's line stays live and the time goes in `tail`.
   on('ui.render', { component: 'PromptHint' }, async ($, e, next) => {
+    const time = await elapsed($).catch(() => null)
     const parts = e.props.hint
       .split('·')
       .map(part => part.replace(CYCLE_TIP, '').trim())
-      .filter(part => part && !AGENTS_PILL.test(part))
-    const time = await elapsed($).catch(() => null)
+      .filter(Boolean)
+    if (parts.some(part => !KEY_HINT.test(part)))
+      return next(time ? { ...e, props: { ...e.props, tail: time } } : e)
     return next({ ...e, props: { ...e.props, hint: [time, ...parts].filter(Boolean).join(' · ') } })
   })
 }

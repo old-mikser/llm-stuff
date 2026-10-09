@@ -25,8 +25,10 @@ footer, after the mode labels:
   without sending a prompt.
 - **Hint line.** Starts with the time since the session's first prompt, `new`
   until one is sent; a session whose turns predate the mod counts from its
-  launch. Drops the `(shift+tab to cycle)` tip and the `← N agents` pill. The
-  rewritten hint is plain text, so its pills stop being clickable.
+  launch. Drops the `(shift+tab to cycle)` tip. A rewritten hint is plain
+  text, so while a pill shows (`← N agents`, which opens the background tasks
+  and monitors) the line is left live with the tip, and the time goes at its
+  end instead.
 
 ## Install
 
