@@ -1,1 +1,1 @@
-{ "name": "ctx-footer", "version": "0.1.0", "description": "Model and context tokens at the right of the prompt footer", "types": "./types/index.d.ts" }
+{ "name": "ctx-footer", "version": "0.1.0", "description": "Model, effort and context tokens in the prompt footer; drops the shift+tab tip from the hint line", "types": "./types/index.d.ts" }

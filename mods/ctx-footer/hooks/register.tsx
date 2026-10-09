@@ -2,6 +2,10 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
 const tokens = atom({ plugin: 'ctx-footer', key: 'tokens' } as const, null)
+const effort = atom({ plugin: 'ctx-footer', key: 'effort' } as const, null)
+
+const CYCLE_TIP = /\([^)]*to cycle\)/
+const AGENTS_PILL = /^←\s*\d+\s+agents?$/
 
 // "claude-opus-5-5" -> "Opus 5.5"
 const label = (id: string) => {
@@ -15,9 +19,9 @@ const label = (id: string) => {
 // Before the first API response of a window (fresh session, /clear, compaction) the engine has no
 // measured fill, so fall back to /context's local estimate, which sends no requests.
 async function refresh($: EngineInterface) {
-  const { context } = await $.session.usage()
-  if (context.tokens != null) {
-    await update($, tokens, () => ({ n: context.tokens!, estimated: false }))
+  const n = (await $.session.usage()).context.tokens
+  if (n != null) {
+    await update($, tokens, () => ({ n, estimated: false }))
     return
   }
   const est = await $.session.usage({ breakdown: 'summary' }).then(u => u.context.breakdown?.totalTokens, () => undefined)
@@ -27,7 +31,9 @@ async function refresh($: EngineInterface) {
 async function text($: EngineInterface) {
   const m = await $.session.model().then(label, () => null)
   const t = await read($, tokens)
-  return [m, t ? `${t.estimated ? '~' : ''}${(t.n / 1000).toFixed(1)}k` : null].filter(Boolean).join(' · ')
+  const f = await read($, effort)
+  const fill = t ? `${t.estimated ? '~' : ''}${(t.n / 1000).toFixed(1)}k` : null
+  return [[m, f].filter(Boolean).join(' '), fill].filter(Boolean).join(' · ')
 }
 
 export const register: Register = on => {
@@ -46,6 +52,7 @@ export const register: Register = on => {
   on('turn.step', async function* ($, e, next) {
     const r = yield* next(e)
     if (!e.agentId) {
+      await update($, effort, () => (e.effort == null ? null : String(e.effort)))
       await refresh($)
       $.ui.invalidate('ui.render')
     }
@@ -60,5 +67,17 @@ export const register: Register = on => {
     } catch {
       return next(e)
     }
+  })
+
+  // A rewritten hint is drawn as plain text and its pills stop being clickable, so leave a hint
+  // with nothing to drop untouched.
+  on('ui.render', { component: 'PromptHint' }, async ($, e, next) => {
+    const parts = e.props.hint.split('·').map(part => part.trim())
+    const untipped = parts.map(part => part.replace(CYCLE_TIP, '').trim()).filter(Boolean)
+    const unpilled = untipped.filter(part => !AGENTS_PILL.test(part))
+    // Any rewrite makes the engine draw `<mode> · <hint>`, dot included, so keep the pill when nothing else is left.
+    const kept = unpilled.length ? unpilled : untipped
+    if (kept.length === parts.length && !CYCLE_TIP.test(e.props.hint)) return next(e)
+    return next({ ...e, props: { ...e.props, hint: kept.join(' · ') } })
   })
 }
