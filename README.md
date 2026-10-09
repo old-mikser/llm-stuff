@@ -7,7 +7,7 @@ a mod.
 |------|-------|------|
 | Hooks | [`.claude/hooks/`](.claude/hooks/) | Six shell hooks: chimes, comment-policy enforcement and its commit-time layer. Listed below. |
 | Skill | [`skills/orchestrate/`](skills/orchestrate/) | Runs a plan through subagents. See [`orchestrate`](#orchestrate--a-skill-that-runs-a-plan-through-subagents). |
-| Mod | [`mods/ctx-footer/`](mods/ctx-footer/) | Model, effort and context size in the prompt footer. See [`ctx-footer`](#ctx-footer--model-effort-and-context-size-in-the-prompt-footer). |
+| Mod | [`mods/ctx-footer/`](mods/ctx-footer/) | Model, effort and context size in the prompt footer. See [its README](mods/ctx-footer/README.md). |
 
 The hooks:
 
@@ -462,47 +462,7 @@ ln -s "$PWD/skills/orchestrate" ~/.claude/skills/orchestrate
 
 ## `ctx-footer` — model, effort and context size in the prompt footer
 
-[`mods/ctx-footer/`](mods/ctx-footer/) is a Claude Code mod (a hooks-module
-plugin). It adds the current model, the effort level and the context token
-count to the right end of the footer row, after the mode labels:
-
-```
-12m · ⏵⏵ auto mode on                                   Opus 5.5 high · 52.8k
-```
-
-- **Context count.** Refreshes after every main-thread step, on each
-  `session.measure`, and once a minute. Before the first response of a window
-  (a fresh session, `/clear`, a compaction) it shows `/context`'s local
-  estimate with a `~` prefix.
-- **Cold cache.** The count turns light blue when the main thread has had no
-  response within the 1h prompt-cache TTL. The last response time is kept per
-  session in the mod's store. A session with no stored time takes it from its
-  transcript's last assistant row, which fails above 4 MiB and reads as cold.
-- **Effort.** Taken from each turn step. Until the first one in a resumed or
-  cleared session, it shows the last level seen, else `effortLevel` from
-  settings.
-- **Resume and `/clear`.** The footer fills in on its own shortly after,
-  without sending a prompt.
-- **Hint line.** Starts with the session's length, and drops the
-  `(shift+tab to cycle)` tip and the `← N agents` pill.
-
-Install by linking it into your mods directory and naming it in the `env`
-block of `~/.claude/settings.json`:
-
-```bash
-mkdir -p ~/.claude/mods
-ln -s "$PWD/mods/ctx-footer" ~/.claude/mods/ctx-footer
-```
-
-```json
-{ "env": { "CLAUDE_CODE_PLUGIN_DIRS": "/home/<you>/.claude/mods/ctx-footer" } }
-```
-
-An interactive session watches that folder and reloads the mod on save. Run
-`claude plugin validate mods/ctx-footer` after every edit. A module that does
-not load leaves the previous version running, and the footer gives no sign of
-that. A helper that takes `$` must be a top-level function, not a closure
-inside `register`.
-
-The text goes in the `SessionMode` slot on purpose. The `PromptHint` tail does
-not count the agent pills, so long text there gets cut to `…`.
+[`mods/ctx-footer/`](mods/ctx-footer/) is a Claude Code mod that shows the
+model, effort and context token count in the prompt footer, tinting the count
+when the prompt cache is cold. Install and details are in
+[its README](mods/ctx-footer/README.md).
