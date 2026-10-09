@@ -1,8 +1,15 @@
 # llm-stuff
 
-Personal Claude Code configuration — hooks and skills I reuse across machines.
+Personal Claude Code configuration I reuse across machines: hooks, a skill and
+a mod.
 
-Everything lives under [`.claude/hooks/`](.claude/hooks/). Six hooks are included:
+| Kind | Where | What |
+|------|-------|------|
+| Hooks | [`.claude/hooks/`](.claude/hooks/) | Six shell hooks: chimes, comment-policy enforcement and its commit-time layer. Listed below. |
+| Skill | [`skills/orchestrate/`](skills/orchestrate/) | Runs a plan through subagents. See [`orchestrate`](#orchestrate--a-skill-that-runs-a-plan-through-subagents). |
+| Mod | [`mods/ctx-footer/`](mods/ctx-footer/) | Model, effort and context size in the prompt footer. See [`ctx-footer`](#ctx-footer--model-effort-and-context-size-in-the-prompt-footer). |
+
+The hooks:
 
 | Hook | Event | What it does |
 |------|-------|--------------|
