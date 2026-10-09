@@ -79,9 +79,20 @@ function reseed($: EngineInterface, delays: number[]) {
     })
 }
 
+const firstTurnKey = async ($: EngineInterface) => `first-turn:${await $.session.id()}`
+
+// Counts from the first prompt; a session with turns from before this record falls back to its launch.
 async function elapsed($: EngineInterface) {
-  const { startedAt } = await $.session.usage()
-  const m = Math.floor(((await $.clock.now()) - startedAt) / 60_000)
+  const key = await firstTurnKey($)
+  const stored = await $.store.get(key)
+  let since: number
+  if (typeof stored === 'number') since = stored
+  else {
+    if ((await $.session.turns()) === 0) return 'new'
+    since = (await $.session.usage()).startedAt
+    await $.store.set(key, since)
+  }
+  const m = Math.floor(((await $.clock.now()) - since) / 60_000)
   return m < 60 ? `${m}m` : `${Math.floor(m / 60)}h ${m % 60}m`
 }
 
@@ -109,6 +120,15 @@ export const register: Register = on => {
     const r = await next(e)
     if (e.reason === 'clear' || e.reason === 'resume') reseed($, [200, 1_000, 5_000])
     return r
+  })
+
+  on('turn.start', async ($, e, next) => {
+    const key = await firstTurnKey($)
+    if (typeof (await $.store.get(key)) !== 'number') {
+      await $.store.set(key, await $.clock.now())
+      $.ui.invalidate('ui.render')
+    }
+    return next(e)
   })
 
   on('session.measure', async ($, e, next) => {

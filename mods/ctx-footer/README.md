@@ -23,9 +23,10 @@ footer, after the mode labels:
   settings.
 - **Resume and `/clear`.** The footer fills in on its own shortly after,
   without sending a prompt.
-- **Hint line.** Starts with the session's length, and drops the
-  `(shift+tab to cycle)` tip and the `← N agents` pill. The rewritten hint is
-  plain text, so its pills stop being clickable.
+- **Hint line.** Starts with the time since the session's first prompt, `new`
+  until one is sent; a session whose turns predate the mod counts from its
+  launch. Drops the `(shift+tab to cycle)` tip and the `← N agents` pill. The
+  rewritten hint is plain text, so its pills stop being clickable.
 
 ## Install
 
