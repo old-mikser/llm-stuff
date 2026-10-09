@@ -60,10 +60,23 @@ async function isCold($: EngineInterface) {
   return (await $.clock.now()) - at > CACHE_TTL_MS
 }
 
-// A resumed session has no `turn.step` yet, so the effort comes from settings until the first turn.
+let lastEffort: string | null = null
+
+// Until the first `turn.step` of a resumed or cleared session, the last seen effort, else settings'.
 async function fallbackEffort($: EngineInterface) {
-  const level = (await $.settings.read()).effortLevel
-  if (typeof level === 'string') await update($, effort, prev => prev ?? level)
+  const configured = (await $.settings.read()).effortLevel
+  const level = lastEffort ?? (typeof configured === 'string' ? configured : null)
+  if (level) await update($, effort, prev => prev ?? level)
+}
+
+function reseed($: EngineInterface, delays: number[]) {
+  for (const ms of delays)
+    $.clock.after(ms, () => {
+      void fallbackEffort($)
+        .catch(() => {})
+        .then(() => refresh($))
+        .then(() => $.ui.invalidate('ui.render'))
+    })
 }
 
 async function elapsed($: EngineInterface) {
@@ -86,8 +99,15 @@ export const register: Register = on => {
     await fallbackEffort($).catch(() => {})
     await refresh($)
     // On `--resume` the transcript can land after this hook, so the first read sees no window yet.
-    for (const ms of [1_000, 5_000]) $.clock.after(ms, () => void refresh($).then(() => $.ui.invalidate('ui.render')))
+    reseed($, [1_000, 5_000])
     $.clock.every(60_000, () => void refresh($).then(() => $.ui.invalidate('ui.render')))
+    return r
+  })
+
+  // A `/clear` or in-process resume starts a new session with empty state and no `session.start`.
+  on('session.end', async ($, e, next) => {
+    const r = await next(e)
+    if (e.reason === 'clear' || e.reason === 'resume') reseed($, [200, 1_000, 5_000])
     return r
   })
 
@@ -101,7 +121,8 @@ export const register: Register = on => {
     const r = yield* next(e)
     if (!e.agentId) {
       await $.store.set(await lastResponseKey($), await $.clock.now())
-      await update($, effort, () => (e.effort == null ? null : String(e.effort)))
+      lastEffort = e.effort == null ? null : String(e.effort)
+      await update($, effort, () => lastEffort)
       await refresh($)
       $.ui.invalidate('ui.render')
     }
