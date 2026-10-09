@@ -12,15 +12,22 @@ const label = (id: string) => {
   return minor ? `${name} ${major}.${minor}` : `${name} ${major}`
 }
 
+// Before the first API response of a window (fresh session, /clear, compaction) the engine has no
+// measured fill, so fall back to /context's local estimate, which sends no requests.
 async function refresh($: EngineInterface) {
   const { context } = await $.session.usage()
-  await update($, tokens, () => context.tokens ?? null)
+  if (context.tokens != null) {
+    await update($, tokens, () => ({ n: context.tokens!, estimated: false }))
+    return
+  }
+  const est = await $.session.usage({ breakdown: 'summary' }).then(u => u.context.breakdown?.totalTokens, () => undefined)
+  await update($, tokens, () => (est ? { n: est, estimated: true } : null))
 }
 
 async function text($: EngineInterface) {
   const m = await $.session.model().then(label, () => null)
   const t = await read($, tokens)
-  return [m, t ? `${(t / 1000).toFixed(1)}k` : null].filter(Boolean).join(' · ')
+  return [m, t ? `${t.estimated ? '~' : ''}${(t.n / 1000).toFixed(1)}k` : null].filter(Boolean).join(' · ')
 }
 
 export const register: Register = on => {
@@ -34,6 +41,15 @@ export const register: Register = on => {
     await refresh($)
     $.ui.invalidate('ui.render')
     return next(e)
+  })
+
+  on('turn.step', async function* ($, e, next) {
+    const r = yield* next(e)
+    if (!e.agentId) {
+      await refresh($)
+      $.ui.invalidate('ui.render')
+    }
+    return r
   })
 
   on('ui.render', { component: 'SessionMode' }, async ($, e, next) => {

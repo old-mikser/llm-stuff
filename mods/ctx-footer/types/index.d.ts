@@ -1,4 +1,4 @@
-export type Tokens = number | null
+export type Tokens = { n: number; estimated: boolean } | null
 
 declare module 'claude-code' {
   interface PluginState {
