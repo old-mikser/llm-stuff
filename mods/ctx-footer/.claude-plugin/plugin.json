@@ -1,0 +1,1 @@
+{ "name": "ctx-footer", "version": "0.1.0", "description": "Model and context tokens at the right of the prompt footer", "types": "./types/index.d.ts" }

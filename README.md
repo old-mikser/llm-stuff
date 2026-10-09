@@ -452,3 +452,36 @@ Install by linking it into your skills directory:
 ```bash
 ln -s "$PWD/skills/orchestrate" ~/.claude/skills/orchestrate
 ```
+
+## `ctx-footer` — model and context size in the prompt footer
+
+[`mods/ctx-footer/`](mods/ctx-footer/) is a Claude Code mod (a hooks-module
+plugin). It adds the current model and the context token count to the right
+end of the footer row, after the mode labels:
+
+```
+⏵⏵ auto mode on (shift+tab to cycle) · ← 2 agents            Opus 5.5 · 52.8k
+```
+
+The count refreshes on every `session.measure` event.
+
+Install by linking it into your mods directory and naming it in the `env`
+block of `~/.claude/settings.json`:
+
+```bash
+mkdir -p ~/.claude/mods
+ln -s "$PWD/mods/ctx-footer" ~/.claude/mods/ctx-footer
+```
+
+```json
+{ "env": { "CLAUDE_CODE_PLUGIN_DIRS": "/home/<you>/.claude/mods/ctx-footer" } }
+```
+
+An interactive session watches that folder and reloads the mod on save. Run
+`claude plugin validate mods/ctx-footer` after every edit. A module that does
+not load leaves the previous version running, and the footer gives no sign of
+that. A helper that takes `$` must be a top-level function, not a closure
+inside `register`.
+
+The text goes in the `SessionMode` slot on purpose. The `PromptHint` tail does
+not count the agent pills, so long text there gets cut to `…`.
