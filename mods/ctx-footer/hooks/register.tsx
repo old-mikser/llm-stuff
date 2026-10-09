@@ -28,6 +28,12 @@ async function refresh($: EngineInterface) {
   await update($, tokens, () => (est ? { n: est, estimated: true } : null))
 }
 
+async function elapsed($: EngineInterface) {
+  const { startedAt } = await $.session.usage()
+  const m = Math.floor(((await $.clock.now()) - startedAt) / 60_000)
+  return m < 60 ? `${m}m` : `${Math.floor(m / 60)}h ${m % 60}m`
+}
+
 async function text($: EngineInterface) {
   const m = await $.session.model().then(label, () => null)
   const t = await read($, tokens)
@@ -40,6 +46,7 @@ export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     const r = await next(e)
     await refresh($)
+    $.clock.every(60_000, () => $.ui.invalidate('ui.render'))
     return r
   })
 
@@ -69,15 +76,13 @@ export const register: Register = on => {
     }
   })
 
-  // A rewritten hint is drawn as plain text and its pills stop being clickable, so leave a hint
-  // with nothing to drop untouched.
+  // A rewritten hint is drawn as plain text after `<mode> · `, so its pills stop being clickable.
   on('ui.render', { component: 'PromptHint' }, async ($, e, next) => {
-    const parts = e.props.hint.split('·').map(part => part.trim())
-    const untipped = parts.map(part => part.replace(CYCLE_TIP, '').trim()).filter(Boolean)
-    const unpilled = untipped.filter(part => !AGENTS_PILL.test(part))
-    // Any rewrite makes the engine draw `<mode> · <hint>`, dot included, so keep the pill when nothing else is left.
-    const kept = unpilled.length ? unpilled : untipped
-    if (kept.length === parts.length && !CYCLE_TIP.test(e.props.hint)) return next(e)
-    return next({ ...e, props: { ...e.props, hint: kept.join(' · ') } })
+    const parts = e.props.hint
+      .split('·')
+      .map(part => part.replace(CYCLE_TIP, '').trim())
+      .filter(part => part && !AGENTS_PILL.test(part))
+    const time = await elapsed($).catch(() => null)
+    return next({ ...e, props: { ...e.props, hint: [time, ...parts].filter(Boolean).join(' · ') } })
   })
 }
