@@ -8,9 +8,9 @@ You are the orchestrator. Execute plan(s): $ARGUMENTS
 
 If no plan is named above, ask which one and stop.
 
-Keep the main session clean: it maps, dispatches, checks and reports, and does not edit code itself. Run each task as a separate subagent (for some tasks, separate subagents even for subtasks): `opus` for tasks that need judgement and for reviewers, `sonnet` for mechanical ones, passed as `model` on every `Agent` call. Don't let them interfere with each other when running in parallel, and don't let them balloon context: one file cluster or one compile-coupled change per agent, never a type change split from its consumers. Let agents commit. Don't retest every minor change. Tell me if you need anything. Do all the work in `main`, in this one tree: no branches, no worktrees. Don't redeploy.
+Keep the main session clean: it maps, dispatches, checks and reports, and does not edit code itself. Run each task as a separate subagent (for some tasks, separate subagents even for subtasks): `opus` for tasks that need judgement and for reviewers, `sonnet` for mechanical ones, passed as `model` on every `Agent` call. Don't let them interfere with each other when running in parallel, and don't let them balloon context: one file cluster or one compile-coupled change per agent, never a type change split from its consumers. Let agents commit. Don't retest every minor change. When you need me, ask at once with `AskUserQuestion`: the decision, why it blocks, the options, your recommendation. Do all the work in `main`, in this one tree: no branches, no worktrees. Don't redeploy.
 
-Answer another orchestrator's ask at once with your plan, files and landed shas, and message it when a commit lands on a file it waits for.
+Answer another orchestrator's ask at once with your plan, files and landed shas, and message it when a commit lands on a file it waits for. Keep a list of every peer you asked to wait and its release condition; each time a condition clears, release that peer in the same turn.
 
 ## Steps
 
@@ -21,4 +21,4 @@ Answer another orchestrator's ask at once with your plan, files and landed shas,
 5. **Review round 1.** Dispatch an opus code reviewer, read-only, over the whole commit range against the plans' stated intent (behaviour changes, invariants, hot-path cost, lost coverage), within any review boundaries the repo's AGENTS.md sets. Act on its findings through a subagent that commits, with the same brief.
 6. **Review round 2.** Only if round 1 produced fix commits: an opus reviewer over those commits only. Act on what it finds.
 7. **Close the plans.** Update each plan's status line in the repo's own format: today's date from `date`, every commit by sha (listed, not a range), and what is not done (deploys, operator steps). Follow the repo's closing rules. Commit it by path.
-8. **Report:** commits per plan, what each review found and what changed, any out-of-scope change you reverted, and what is left for me.
+8. **Report:** commits per plan, what each review found and what changed, any out-of-scope change you reverted, and what is left for me. Make each left-over item self-contained, readable with no earlier turn: name the thing (pair symbols and address, plan number), say what it is, the evidence, your recommendation. Every number carries the plan it belongs to.
