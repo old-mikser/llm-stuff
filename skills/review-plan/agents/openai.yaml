@@ -1,3 +1,0 @@
-interface:
-  display_name: "Review plan"
-  short_description: "Re-check a plan's facts, seams and touch list before work starts"
