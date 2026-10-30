@@ -12,7 +12,7 @@ Treat the review as a list of **claims** to re-derive, never as evidence. Stay r
 3. **Re-derive each claim** from the primary source, not the review's quote: the cited line, the chain at the claimed block, the DB with its coverage. Re-run every number at the review's **pin** (commit, block, time window). If the pin is unreachable, for example a pruned node, move to an archive; if none exists, mark the number "unverified at pin". A latest-state read that matches the review proves only that the review read latest state too. Done: every claim has its own evidence, labelled code / chain@block / DB.
 4. **Grade fact and fix apart.** Verdicts: Confirmed · True, not reachable today · Partly wrong · Refuted · Unverified. A true finding often carries a wrong fix, so test the fix on its own. Test both against the repo's ADRs and recorded operator decisions.
 5. **Look past the review** for issues in the same code that it missed.
-6. **Report** in the format below, then ask with `AskUserQuestion` (multi-select): which findings to fix.
+6. **Report** in the format below, then stop for rulings.
 
 ## Report
 
@@ -26,4 +26,4 @@ Treat the review as a list of **claims** to re-derive, never as evidence. Stay r
 - **Where I disagree:** evidence first, then reasoning.
 - **New issues:** the same three fields.
 
-Define each code term in plain words the first time the report uses it. Keep formulas out of "What breaks"; put them under "Why" when they carry the argument.
+Define each code term in plain words the first time the report uses it. Keep formulas out of "What breaks"; put them under "Why" when they carry the argument. End with the numbered findings, so the user can reply "1 fix, 2 skip, 3 explain".
