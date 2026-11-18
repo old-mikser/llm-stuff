@@ -11,4 +11,5 @@ a mod. Each has its own README with install steps.
 | Skill | [`skills/grill-docs/`](skills/grill-docs/README.md) | "Grill with docs" or `/grill-docs`: `grill` plus `domain-modeling`, Matt Pocock's `grill-with-docs`, slightly updated. |
 | Skill | [`skills/verify-review/`](skills/verify-review/README.md) | Paste a review and ask to verify it: re-derives each claim at the review's own pin, grades fact and fix apart, reports in plain English. |
 | Skill | [`skills/review-plan/`](skills/review-plan/README.md) | Ask to review a plan: re-checks its facts at their pins, tests the design at its seams and the deployed config, lists touch-list misses, then rewrites the plan on your rulings. |
+| Skill | [`skills/delegate/`](skills/delegate/README.md) | `/delegate` or "let omp implement": Claude plans and verifies, omp with DeepSeek implements, fixes loop back into the same omp session. |
 | Mod | [`mods/ctx-footer/`](mods/ctx-footer/README.md) | Model, effort and context size in the prompt footer, tinted when the prompt cache is cold. |
